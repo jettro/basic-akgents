@@ -152,4 +152,231 @@ Everything below that point inherits the orchestrator for free, and the telemetr
 (`get_team()`, `get_messages()`, `get_states()`) are asked of the **orchestrator**, not of the
 coordinator.
 
+#### Talking to the human from the command line
+
+`UserProxy` is the bridge to the human. Out of the box it only *logs* the question, so subclass it and
+override `receiveMsg_UserMessage`. The reply goes back through `process_human_input(content, message)`,
+which wraps the text in a `ResultMessage` and sends it to `message.sender` - the agent that asked.
+
+```python
+class CliUserProxyAgent(UserProxy):
+    def receiveMsg_UserMessage(self, message: UserMessage, sender: ActorAddress) -> None:
+        print(f"\n[{sender.name}] {message.content}")
+        self.process_human_input(input("> ").strip(), message)
+
+    def receiveMsg_ResultMessage(self, message: ResultMessage, sender: ActorAddress) -> None:
+        print(f"\n[{sender.name}] {message.content}")
+        self.completed.set()
+```
+
+The round trip for one case:
+
+1. `main` reads the case id from the command line and starts orchestrator -> coordinator -> children.
+2. `main` sends `HandleCaseRequest` to the coordinator.
+3. The coordinator sends a `CaseTriageRequest` to `@CaseTriage` - no human involved yet.
+4. Triage reads the case and answers with a `CaseTriageResponse`: the *proposed* priority plus the
+   reason for it.
+5. The coordinator sends a `UserMessage` to the proxy asking to approve that priority.
+6. The proxy reads stdin and answers with a `ResultMessage` to the coordinator.
+7. The coordinator turns the answer into a `CasePriorityDecision` for triage, which writes it to the
+   case system and replies `CaseTriageCompleted`.
+8. The coordinator sends the outcome as a `ResultMessage` to the **proxy**, which prints it. Done.
+
+Two things worth remembering:
+
+- `input()` runs in the proxy's own actor thread and blocks its mailbox while the human types. Fine for
+  a console demo - other messages just queue up - but never do this in an agent that has to stay
+  responsive.
+- Don't `time.sleep()` in `main` hoping the workflow is finished. Hand the proxy a `threading.Event`
+  and wait on it:
+
+  ```python
+  case_handled = threading.Event()
+  actor_system.proxy_tell(user_proxy_address, CliUserProxyAgent).set_completion_event(case_handled)
+  actor_system.tell(coordinator_addr, HandleCaseRequest(requester_id=getpass.getuser()))
+  case_handled.wait(timeout=300)
+  ```
+
+  `proxy_tell` is a plain in-process method call, so the `Event` is passed by reference; it never goes
+  through serialization the way a message field would. Mailbox order guarantees the event is set on the
+  proxy before `HandleCaseRequest` can produce a result.
+
+Create the proxy through the coordinator (`coordinator.createActor(CliUserProxyAgent, config=...)`) so
+it is a real team member with telemetry, and keep its address in `set_agents` next to the other agents.
+
+Run it with `uv run src/main.py case_1` (or without the argument, then it asks for the case id).
+
+#### Ask the human to approve, not to do the work
+
+First version asked the human "what can we do for you?" - but everything the team needs is already in
+the case. The agents do the work, the human only *decides*: triage proposes a priority, the human
+approves it. That is the human-in-the-loop pattern worth remembering.
+
+Two rules that fell out of it:
+
+- **Ask a closed question and show the reasoning.** The proposal carries a `reason` field
+  ("the case mentions 'outage'"), so the human can judge in one glance instead of re-reading the case.
+  Approve with Enter, reject with `n`, or type another priority (1-4) to override in one step.
+- **Do not persist before the verdict.** `receiveMsg_CaseTriageRequest` only *computes* the priority;
+  `receiveMsg_CasePriorityDecision` is the only handler that calls `save_case`. Approval stores the
+  priority plus `"priority 2 approved by <user>"`, rejection leaves the priority alone and logs
+  `"proposed priority 1 rejected by <user>"` - the refusal itself is worth keeping.
+
+The waiting is in the *state*, not in a blocked thread: the coordinator sets `status =
+"awaiting_approval"` and returns. Its `receiveMsg_ResultMessage` checks that status and ignores
+anything arriving outside that window, which is how an actor models "a question is open" without
+holding on to a thread. Never `proxy_ask` the proxy for the answer - that blocks the coordinator's
+mailbox for as long as the human takes.
+
+An unknown case id now ends the run right away (`known_case=False` -> "closed - Case ... is not known"),
+because without a case there is nothing to triage and nothing to approve.
+
+#### Giving an agent a repository (or any other dependency)
+
+Interface first. In Python "interface style" means a `typing.Protocol`: structural typing, so an
+implementation does **not** inherit from it, it only has to have the same methods. Leave the bodies
+empty (`...`) - a Protocol method with a real body silently becomes a default implementation for
+anything that *does* inherit from it.
+
+```python
+@runtime_checkable
+class CaseRepository(Protocol):
+    def load_case(self, case_id: str) -> Case: ...
+    def save_case(self, case: Case) -> None: ...
+
+
+class DummyCaseRepository:          # no inheritance needed
+    def load_case(self, case_id: str) -> Case: ...
+    def save_case(self, case: Case) -> None: ...
+```
+
+`@runtime_checkable` only enables `isinstance()`, and only checks *method names*, never signatures.
+Type checking of the real contract happens at the injection point (`case_repository: CaseRepository =
+DummyCaseRepository()`). Use an `ABC` instead only when you want shared implementation or a hard
+"must inherit" rule.
+
+Data goes in a plain `pydantic.BaseModel`. Note: `typing.ReadOnly` does **not** work here - it only
+exists from Python 3.13 and only for `TypedDict`. For a model field it is `Field(frozen=True)`.
+
+```python
+class Case(BaseModel):
+    case_id: str = Field(frozen=True)
+    case_description: str = Field(default="", frozen=True)
+    case_priority: CasePriority = CasePriority.UNSET
+    actions: list[str] = Field(default_factory=list)
+```
+
+Frozen fields also mean you never edit a case in place; produce a new one:
+`case.model_copy(update={"case_priority": CasePriority.CRITICAL})`.
+
+Getting it into the agent - the same rule as with an `ActorAddress`: **a repository is a live object,
+so it belongs on the instance, never in the config or the state** (both get serialized and snapshotted
+to the orchestrator). And `createActor(actor_class, agent_id=..., config=...)` takes no extra
+constructor arguments, so it cannot go in there either. That leaves the setter, exactly like
+`set_agents`:
+
+```python
+class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
+    cases: CaseRepository | None
+
+    def on_start(self) -> None:
+        self.state = CaseTriageState()
+        self.cases = None
+        self.state.observer(self)
+
+    def set_case_repository(self, repository: CaseRepository) -> None:
+        self.cases = repository
+```
+
+```python
+# main.py - the composition root decides which implementation the team gets
+case_repository: CaseRepository = DummyCaseRepository()
+actor_system.proxy_tell(triage_agent_address, CaseTriageAgent).set_case_repository(case_repository)
+```
+
+`proxy_tell` is a normal in-process method call, so the object is passed by reference. Mailbox order
+guarantees the setter runs before the first `CaseTriageRequest` arrives.
+
+Two consequences of the actor model:
+
+- One repository instance is shared by several agent **threads**, so the implementation must be thread
+  safe. `DummyCaseRepository` guards its dict with a `threading.Lock` and hands out
+  `model_copy(deep=True)` copies, so a caller can never mutate the store by accident.
+- Blocking I/O in a repository blocks that agent's mailbox. Fine for an in-memory dummy, something to
+  watch with a real database.
+
+If a whole tree of agents needs the same dependency, a setter on every one of them gets tedious. The
+alternative is a tiny provider module (`case_repository()` returning a module-level singleton that the
+composition root replaces once) which each `on_start` calls itself. Explicit injection stays the
+better default: it is visible and trivially replaceable in a test.
+
+#### Name the scale: is 4 higher than 3?
+
+Honest answer to my own question: **no, a bare number says nothing.** `case_priority: int = 4` forced
+every reader to guess whether 4 was "very urgent" or "whenever". Two conventions exist and both are
+common - ITIL/Jira count *down* (P1 is the emergency), a plain "importance" score counts *up*. If the
+code does not say which, the human at the prompt has to guess.
+
+So the scale moved into `case_priority.py` as an `IntEnum`:
+
+```python
+class CasePriority(IntEnum):
+    UNSET = 0
+    CRITICAL = 1
+    HIGH = 2
+    NORMAL = 3
+    LOW = 4
+```
+
+Why an `IntEnum` and not a `StrEnum` or a plain constant:
+
+- It still *is* an int, so `CasePriority.CRITICAL < CasePriority.LOW` sorts correctly, existing
+  comparisons keep working and pydantic serializes it as a number - important, because these values
+  travel through `Message` fields and `BaseState` snapshots.
+- The member name carries the meaning: `1 - critical` instead of `1`.
+- `int` -> enum conversion is automatic in pydantic, so `Case(case_priority=1)` and a deserialized
+  telemetry snapshot both come back as `CasePriority.CRITICAL`.
+
+Everything a human reads goes through `.label` (`"3 - normal"`), and the prompt now prints the whole
+scale (`PRIORITY_SCALE`) so nobody has to remember the direction. The lesson is general: **a magic
+number that a human must interpret needs a name, and the legend belongs next to the question.**
+
+#### Only triage what still needs triaging
+
+`UNSET = 0` gives "not looked at yet" a value of its own, instead of abusing the lowest priority for
+it. That turns the guard into one readable line in `receiveMsg_CaseTriageRequest`:
+
+```python
+if case.case_priority.is_set:
+    ...  # answer with already_prioritised=True, do not touch the case
+```
+
+The check lives in **triage**, not in the coordinator: triage owns the case data, so it decides whether
+there is work. The coordinator only reacts to the flag - `already_prioritised` closes the case with a
+report and never asks the human anything (15 messages instead of 27, so the shortcut is visible in the
+telemetry too).
+
+Three flags now describe the outcome of one request, which is worth keeping apart:
+
+| `known_case` | `already_prioritised` | what happens |
+|---|---|---|
+| `False` | - | case id unknown, run closes |
+| `True` | `True` | priority was already decided, nothing to do |
+| `True` | `False` | proposal goes to the human for approval |
+
+A rejected proposal leaves the case at `UNSET`, so it is picked up again on the next run - a rejection
+is "not this priority", not "never triage this". An approval writes the priority and the audit line, and
+from then on the case is refused by the same guard.
+
+The dummy store holds five cases on purpose: `case_1`, `case_2` and `case_3` without a priority,
+`case_4` (critical) and `case_5` (low) already decided.
+
+```
+uv run src/main.py case_1     # no priority -> proposes 3 - normal
+uv run src/main.py case_2     # no priority -> proposes 1 - critical (mentions 'urgent')
+uv run src/main.py case_4     # already 1 - critical -> "was not triaged"
+uv run src/main.py case_42    # unknown -> closed
+uv run src/main.py            # no argument -> lists the store, then asks for the id
+```
+
 > Wider notes on the framework (dispatch, telemetry, lifecycle, gotchas) live in `.junie/guidelines.md`.
