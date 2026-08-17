@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Iterable
 from typing import Protocol, runtime_checkable
 
@@ -96,8 +95,12 @@ DEMO_CASES: tuple[Case, ...] = (
 class DummyCaseRepository:
     """In-memory `CaseRepository`, seeded with a few demo cases.
 
-    Agents run in their own threads and share one repository instance, so the
-    store is guarded by a lock and hands out copies: a caller can never mutate
+    Exactly one agent owns this store: `CaseRepositoryAgent` holds it and its
+    handlers run one at a time in that agent's own thread, so no lock is needed.
+    Hand it to a second agent and that guarantee is gone - then the
+    implementation has to be thread safe again.
+
+    Copies go in and out (`model_copy(deep=True)`), so a caller can never mutate
     what is stored by accident.
     """
 
@@ -107,7 +110,6 @@ class DummyCaseRepository:
         Args:
             cases: Cases to start with, defaults to `DEMO_CASES`.
         """
-        self._lock = threading.Lock()
         self._cases: dict[str, Case] = {
             case.case_id: case.model_copy(deep=True)
             for case in (DEMO_CASES if cases is None else cases)
@@ -125,8 +127,7 @@ class DummyCaseRepository:
         Raises:
             CaseNotFoundError: If no case exists for this id.
         """
-        with self._lock:
-            case = self._cases.get(case_id)
+        case = self._cases.get(case_id)
 
         if case is None:
             raise CaseNotFoundError(f"No case found for id {case_id!r}")
@@ -139,5 +140,4 @@ class DummyCaseRepository:
         Args:
             case: The case to persist.
         """
-        with self._lock:
-            self._cases[case.case_id] = case.model_copy(deep=True)
+        self._cases[case.case_id] = case.model_copy(deep=True)

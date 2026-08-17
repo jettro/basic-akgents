@@ -6,6 +6,7 @@ from akgentic.core import ActorAddress, ActorSystem, BaseConfig, Orchestrator
 
 from basic_akgents.case_coordinator import CaseCoordinatorConfig, CaseCoordinatorAgent, HandleCaseRequest
 from basic_akgents.case_repository import DEMO_CASES, CaseRepository, DummyCaseRepository
+from basic_akgents.case_repository_agent import CaseRepositoryAgent, CaseRepositoryConfig
 from basic_akgents.case_triage import CaseTriageAgent, CaseTriageConfig
 from basic_akgents.cli_user_proxy import CliUserProxyAgent
 
@@ -36,8 +37,8 @@ def main() -> None:
     case_id = args.case_id or input("Case id: ").strip() or "case_1"
     requester_id = getpass.getuser()
 
-    # Composition root: pick the implementation here, the agents only know the
-    # CaseRepository interface. Swap in a database backed one without touching them.
+    # Composition root: pick the implementation here, only @CaseRepository ever
+    # holds it. Swap in a database backed one without touching any agent.
     case_repository: CaseRepository = DummyCaseRepository()
 
     actor_system = ActorSystem()
@@ -68,6 +69,10 @@ def main() -> None:
             CaseTriageAgent,
             config=CaseTriageConfig(name="@CaseTriage", role="Triage", case_id=case_id),
         )
+        repository_agent_address: ActorAddress = coordinator.createActor(
+            CaseRepositoryAgent,
+            config=CaseRepositoryConfig(name="@CaseRepository", role="Repository", case_id=case_id),
+        )
         user_proxy_address: ActorAddress = coordinator.createActor(
             CliUserProxyAgent,
             config=BaseConfig(name="@UserProxy", role="UserProxy"),
@@ -76,9 +81,14 @@ def main() -> None:
         coordinator.set_agents(triage_agent_address=triage_agent_address,
                                user_proxy_address=user_proxy_address)
 
+        # Case data goes through one agent, so triage only needs its address.
+        actor_system.proxy_tell(triage_agent_address, CaseTriageAgent).set_repository_agent(
+            repository_agent_address)
+
         # Hand the repository over by reference. proxy_tell is a plain method call,
         # so the live object never passes through serialization.
-        actor_system.proxy_tell(triage_agent_address, CaseTriageAgent).set_case_repository(case_repository)
+        actor_system.proxy_tell(repository_agent_address,
+                                CaseRepositoryAgent).set_case_repository(case_repository)
 
         # The user proxy signals this event once it received the final result, so we
         # do not have to guess how long the human needs to type.

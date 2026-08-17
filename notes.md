@@ -310,6 +310,9 @@ alternative is a tiny provider module (`case_repository()` returning a module-le
 composition root replaces once) which each `on_start` calls itself. Explicit injection stays the
 better default: it is visible and trivially replaceable in a test.
 
+> The setter itself survived, the *owner* did not: the repository now lives in one dedicated agent.
+> See "Give the shared state an owner" below.
+
 #### Name the scale: is 4 higher than 3?
 
 Honest answer to my own question: **no, a bare number says nothing.** `case_priority: int = 4` forced
@@ -378,5 +381,84 @@ uv run src/main.py case_4     # already 1 - critical -> "was not triaged"
 uv run src/main.py case_42    # unknown -> closed
 uv run src/main.py            # no argument -> lists the store, then asks for the id
 ```
+
+#### Give the shared state an owner: `@CaseRepository`
+
+The question that started this: one repository instance shared by several agent **threads** needs a
+lock, and a lock is a smell in an actor system. Two things pushed me over:
+
+- `akgentic/core` does not contain a single lock. Its own pile of shared mutable state - message
+  history, state snapshots, metadata - is the `Orchestrator`, and that is *an actor*. The framework's
+  answer to shared state is "give it an owner", not "guard it".
+- The lock made every *call* atomic, not the *sequence*. Triage did load -> `model_copy` -> `save_case`,
+  so a second writer (`CaseHandler` is coming) could slip in between the load and the save and its
+  appended action would silently vanish. A lock inside the repository can never fix that; only the
+  caller knows where the transaction begins.
+
+So the store moved behind one agent - `CaseRepositoryAgent` in `case_repository_agent.py` - and the
+case data became a conversation:
+
+```python
+class CaseInformationRequest(Message):
+    case_id: str = ""                      # empty means "the case of this team"
+
+class CaseInformationResponse(Message):
+    case_id: str = ""
+    found: bool = False
+    case: Case | None = None               # the whole case travels along
+```
+
+A `Case` is a plain `pydantic.BaseModel`, so it may sit inside a `Message`: the serializer turns a
+nested model into its `model_dump()` and the `__model__` marker of the *message* is enough to rebuild
+the whole thing (checked with a `model_dump()` / `deserialize_object()` round trip). Note the
+difference with an `ActorAddress` or a repository: data is fine in a message, a live object is not.
+
+Writes got their own pair, and that is where the payoff is:
+
+```python
+class CaseUpdateRequest(Message):
+    case_id: str = ""
+    case_priority: CasePriority = CasePriority.UNSET   # UNSET: leave the priority alone
+    action: str = ""                                   # line for the audit log
+```
+
+The request describes the **intent**, not the result, so load -> change -> save happens inside a single
+handler of a single-threaded agent. That is atomic by construction, and `DummyCaseRepository` could
+throw its `threading.Lock` away. `UNSET` doubles as "do not touch the priority", which is exactly what
+a rejection needs: the refusal is logged, the priority stays where it was.
+
+**What it costs: reading is no longer a function call.** Triage cannot say `case = self.cases.load_case(...)`
+anymore, so every handler that needed the case had to be cut in two:
+
+```
+CaseTriageRequest    -> CaseInformationRequest  ..  CaseInformationResponse -> CaseTriageResponse
+CasePriorityDecision -> CaseUpdateRequest       ..  CaseUpdateResponse      -> CaseTriageCompleted
+```
+
+Which means triage now has to remember what it was doing, and that is a `status` in its state
+(`loading`, `proposed`, `storing`, ...) plus a guard at the top of each answer handler:
+
+```python
+if self.state.status != "loading":
+    return          # no request of ours is open, this answer is not ours to act on
+```
+
+Same trick as the coordinator's `awaiting_approval`: **an actor waits in its state, never in its
+thread.** The tempting shortcut is `proxy_ask(repository, CaseRepositoryAgent).load_case(...)` - one
+line, no state machine - but that blocks the triage thread and its whole mailbox until the repository
+answers. It also gives up the telemetry, because `proxy_ask` bypasses `_receiveMessage`.
+
+Two smaller lessons:
+
+- The address of the requester goes on the *instance* (`self.reply_to = sender` in the request handler),
+  not in the state - an `ActorAddress` is not serializable. Everything the second half of the handler
+  still needs from the first half (`requester_id`, `proposed_priority`, `approved`) *is* in the state.
+- The repository agent keeps `reads` and `writes` counters in its state. Not needed for the logic, but
+  now the orchestrator shows how often the store was touched, which the shared object never did:
+  `proxy_tell` calls produce no telemetry at all.
+
+The price in messages is visible in the summary: a full run went from 27 to 40 messages, the
+"already prioritised" shortcut from 15 to 22. That is the cost of making every case access an
+observable event - and worth it the moment a second agent starts writing.
 
 > Wider notes on the framework (dispatch, telemetry, lifecycle, gotchas) live in `.junie/guidelines.md`.

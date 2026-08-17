@@ -4,7 +4,12 @@ from akgentic.core.messages import Message
 
 from basic_akgents.case_model import CaseConfig
 from basic_akgents.case_priority import CasePriority
-from basic_akgents.case_repository import Case, CaseNotFoundError, CaseRepository
+from basic_akgents.case_repository_agent import (
+    CaseInformationRequest,
+    CaseInformationResponse,
+    CaseUpdateRequest,
+    CaseUpdateResponse,
+)
 
 URGENT_WORDS = ("urgent", "asap", "immediately", "outage")
 
@@ -43,40 +48,68 @@ class CaseTriageConfig(CaseConfig):
 class CaseTriageState(BaseState):
     known_case: bool = False
     proposed_priority: CasePriority = CasePriority.UNSET
+    requester_id: str = ""
+    approved: bool = False
     status: str = "new"
 
 class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
-    # Live collaborators, never state: they are not serializable.
-    cases: CaseRepository | None
+    """Assesses one case, but never touches the case store itself.
+
+    Case data lives behind `@CaseRepository`, so every step that needs it is a
+    request now and the answer arrives as a message. Triage therefore waits in
+    its *state* (`status`) instead of in a blocked thread:
+
+        CaseTriageRequest    -> CaseInformationRequest  -> CaseTriageResponse
+        CasePriorityDecision -> CaseUpdateRequest       -> CaseTriageCompleted
+    """
+
+    # Live wiring, never state: an address is not serializable.
+    repository_agent: ActorAddress | None
+    reply_to: ActorAddress | None
 
     def on_start(self) -> None:
         self.state = CaseTriageState()
 
-        self.cases = None
+        self.repository_agent = None
+        self.reply_to = None
 
         self.state.observer(self)
 
-    def set_case_repository(self, repository: CaseRepository) -> None:
-        """Inject the case backend this agent works with.
+    def set_repository_agent(self, repository_agent_address: ActorAddress) -> None:
+        """Point triage at the agent that owns the case data.
 
         Args:
-            repository: Any object implementing `CaseRepository`.
+            repository_agent_address: Address of the `CaseRepositoryAgent`.
         """
-        self.cases = repository
+        self.repository_agent = repository_agent_address
 
     def receiveMsg_CaseTriageRequest(self, message: CaseTriageRequest, sender: ActorAddress) -> None:
-        """Assess the case and propose a priority, without storing it yet."""
-        case = self._load_case()
+        """Ask the repository for the case; the assessment follows on its answer."""
+        self.reply_to = sender
 
-        if case is None:
+        self.update_state({
+            "status": "loading",
+            "requester_id": message.requester_id or "unknown",
+        })
+
+        self._ask_repository(CaseInformationRequest(case_id=self.config.case_id))
+
+    def receiveMsg_CaseInformationResponse(self, message: CaseInformationResponse, sender: ActorAddress) -> None:
+        """Assess the case and propose a priority, without storing it yet."""
+        if self.state.status != "loading":
+            # No request of ours is open, so this answer is not ours to act on.
+            return
+
+        case = message.case
+
+        if not message.found or case is None:
             self.update_state({"status": "unknown_case", "known_case": False})
-            self.send(
-                sender,
+            self._reply(
                 CaseTriageResponse(
-                    case_sender=message.requester_id or "unknown",
+                    case_sender=self.state.requester_id,
                     known_case=False,
                     reason=f"Case {self.config.case_id} is not known in the case system.",
-                ),
+                )
             )
             return
 
@@ -85,16 +118,15 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
         if case.case_priority.is_set:
             self.update_state({"status": "already_prioritised", "known_case": True,
                                "proposed_priority": case.case_priority})
-            self.send(
-                sender,
+            self._reply(
                 CaseTriageResponse(
                     case_description=case.case_description,
-                    case_sender=message.requester_id or "unknown",
+                    case_sender=self.state.requester_id,
                     case_priority=case.case_priority,
                     reason=f"the case already has priority {case.case_priority.label}",
                     known_case=True,
                     already_prioritised=True,
-                ),
+                )
             )
             return
 
@@ -105,23 +137,19 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
             {"status": "proposed", "known_case": True, "proposed_priority": case_priority}
         )
 
-        self.send(
-            sender,
+        self._reply(
             CaseTriageResponse(
                 case_description=case.case_description,
-                case_sender=message.requester_id or "unknown",
+                case_sender=self.state.requester_id,
                 case_priority=case_priority,
                 reason=reason,
                 known_case=True,
-            ),
+            )
         )
 
     def receiveMsg_CasePriorityDecision(self, message: CasePriorityDecision, sender: ActorAddress) -> None:
-        """Write the decision of the human to the case system."""
-        case = self._load_case()
-
-        if case is None:
-            raise WarningError(f"Case {self.config.case_id} disappeared before the decision was stored.")
+        """Hand the decision of the human to the agent that owns the case."""
+        self.reply_to = sender
 
         decided_by = message.decided_by or "unknown"
 
@@ -130,46 +158,68 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
             action = f"priority {case_priority.label} approved by {decided_by}"
         else:
             # Rejected: the case keeps the priority it already had, only the
-            # refusal is logged so the next handler can see it.
-            case_priority = case.case_priority
+            # refusal is logged so the next handler can see it. UNSET tells the
+            # repository to leave the stored priority alone.
+            case_priority = CasePriority.UNSET
             action = (
                 f"proposed priority {self.state.proposed_priority.label} "
                 f"rejected by {decided_by}"
             )
 
-        # Frozen fields stay as they are, the triage result is written back.
-        case = case.model_copy(
-            update={
-                "case_priority": case_priority,
-                "actions": [*case.actions, action],
-            }
+        self.update_state({"status": "storing", "approved": message.approved})
+
+        self._ask_repository(
+            CaseUpdateRequest(
+                case_id=self.config.case_id,
+                case_priority=case_priority,
+                action=action,
+            )
         )
-        self.cases.save_case(case)
 
-        self.update_state({"status": "completed" if message.approved else "rejected"})
+    def receiveMsg_CaseUpdateResponse(self, message: CaseUpdateResponse, sender: ActorAddress) -> None:
+        """Report the stored outcome once the repository wrote the decision."""
+        if self.state.status != "storing":
+            return
 
-        self.send(
-            sender,
+        case = message.case
+
+        if not message.found or case is None:
+            raise WarningError(f"Case {self.config.case_id} disappeared before the decision was stored.")
+
+        approved = self.state.approved
+
+        self.update_state({"status": "completed" if approved else "rejected"})
+
+        self._reply(
             CaseTriageCompleted(
                 case_description=case.case_description,
                 case_priority=case.case_priority,
-                approved=message.approved,
-            ),
+                approved=approved,
+            )
         )
 
-    def _load_case(self) -> Case | None:
-        """Load the configured case.
+    def _ask_repository(self, message: Message) -> None:
+        """Send a request to the agent that owns the case data.
 
-        Returns:
-            The stored case, or None when the case system does not know it.
+        Args:
+            message: Request for `@CaseRepository`.
+
+        Raises:
+            WarningError: If no repository agent was wired up yet.
         """
-        if self.cases is None:
-            raise WarningError("No case repository available, call set_case_repository first.")
+        if self.repository_agent is None:
+            raise WarningError("No repository agent available, call set_repository_agent first.")
 
-        try:
-            return self.cases.load_case(self.config.case_id)
-        except CaseNotFoundError:
-            return None
+        self.send(self.repository_agent, message)
+
+    def _reply(self, message: Message) -> None:
+        """Answer whoever asked triage for this piece of work.
+
+        Args:
+            message: Answer for the requester.
+        """
+        if self.reply_to is not None:
+            self.send(self.reply_to, message)
 
     @staticmethod
     def _assess(case_description: str) -> tuple[CasePriority, str]:

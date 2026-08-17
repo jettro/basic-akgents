@@ -67,35 +67,39 @@ Approve priority 1 - critical? [Enter/y] approve, [n] reject, or type another nu
   priority    : 1 - critical (approved by jettro)
 
 === Orchestrator Summary ===
-Total messages: 27
-Team members: 3 agents
-State snapshots: 3 agents tracked
+Total messages: 40
+Team members: 4 agents
+State snapshots: 4 agents tracked
 ===========================
 [Multi-Agent] Demo complete. Shutting down.
 ```
 
 The summary at the end comes from the orchestrator, which records every message, every state change
-and the team roster. Compare a run of `case_2` (27 messages) with `case_4` (15 messages) to see the
+and the team roster. Compare a run of `case_2` (40 messages) with `case_4` (22 messages) to see the
 "already prioritised" shortcut in the telemetry.
 
 ## What happens under the hood
 
 One team handles one case. `src/main.py` is the composition root: it starts the orchestrator, lets the
-orchestrator create the coordinator, and lets the coordinator create its two children.
+orchestrator create the coordinator, and lets the coordinator create its three children.
 
 ```
 Orchestrator
-  └── @CaseCoordinator      drives the case, asks the human to approve
-        ├── @CaseTriage     reads the case, proposes a priority, stores the verdict
-        └── @UserProxy      prints questions on the console and reads your answer
+  └── @CaseCoordinator       drives the case, asks the human to approve
+        ├── @CaseTriage      assesses the case and proposes a priority
+        ├── @CaseRepository  owns the case store, the only agent that reads and writes it
+        └── @UserProxy       prints questions on the console and reads your answer
 ```
 
 1. `main` sends a `HandleCaseRequest` to the coordinator.
 2. The coordinator asks `@CaseTriage` for an assessment - no human involved yet.
-3. Triage answers with the *proposed* priority plus the reason; nothing is stored.
-4. The coordinator asks the human, through `@UserProxy`, to approve that proposal.
-5. Your answer becomes a `CasePriorityDecision`; only then does triage write it to the case store.
-6. The coordinator reports the outcome, the proxy prints it and the demo shuts down.
+3. Triage asks `@CaseRepository` for the case (`CaseInformationRequest`) and gets it back in a
+   `CaseInformationResponse`.
+4. Triage answers with the *proposed* priority plus the reason; nothing is stored.
+5. The coordinator asks the human, through `@UserProxy`, to approve that proposal.
+6. Your answer becomes a `CasePriorityDecision`; triage turns it into a `CaseUpdateRequest`, and
+   `@CaseRepository` is the one that writes it.
+7. The coordinator reports the outcome, the proxy prints it and the demo shuts down.
 
 Two shortcuts skip the human: an unknown case id closes the run, and a case that already has a
 priority is reported as "was not triaged".
@@ -106,7 +110,8 @@ priority is reported as "was not triaged".
 |---|---|
 | `src/main.py` | Composition root: starts the actor system, wires the agents, waits for the result |
 | `src/basic_akgents/case_coordinator.py` | `CaseCoordinatorAgent`, the approval flow |
-| `src/basic_akgents/case_triage.py` | `CaseTriageAgent`, proposes and persists the priority |
+| `src/basic_akgents/case_triage.py` | `CaseTriageAgent`, proposes the priority and hands the verdict on |
+| `src/basic_akgents/case_repository_agent.py` | `CaseRepositoryAgent` and the case information / update messages |
 | `src/basic_akgents/cli_user_proxy.py` | `CliUserProxyAgent`, the human-in-the-loop bridge to stdin |
 | `src/basic_akgents/case_repository.py` | `Case`, the `CaseRepository` protocol and the in-memory dummy |
 | `src/basic_akgents/case_priority.py` | `CasePriority` scale and its labels |
@@ -119,5 +124,7 @@ priority is reported as "was not triaged".
 - Override the proposal by typing another number and see it in the approval line of the report.
 - Run `case_4` or `case_5` to see the guard that refuses a case which was already prioritised. The
   store is in memory, so each run starts from the table above again.
-- Swap `DummyCaseRepository` in `src/main.py` for your own implementation of `CaseRepository`; the
-  agents never see the difference.
+- Swap `DummyCaseRepository` in `src/main.py` for your own implementation of `CaseRepository`; only
+  `@CaseRepository` ever holds it, so no other agent notices.
+- Ask the orchestrator what `@CaseRepository` did: its state snapshot counts the reads and writes, so
+  every touch of the case store is visible in the telemetry.
