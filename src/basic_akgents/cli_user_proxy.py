@@ -5,6 +5,8 @@ from __future__ import annotations
 from akgentic.core import ActorAddress, BaseState, UserProxy
 from akgentic.core.messages import ResultMessage, UserMessage
 
+from basic_akgents.terminal import ask, say
+
 
 def _name_of(address: ActorAddress | None) -> str:
     """Return a printable name for an actor address."""
@@ -20,6 +22,9 @@ class CliUserProxyAgent(UserProxy):
     Printing is all this agent does. That the case is finished is announced by
     the coordinator as a `CaseClosed` event, which the console loop picks up
     through its subscriber - so nothing has to be handed to this agent.
+
+    It prints through `basic_akgents.terminal`, the same `rich` console the front
+    end uses, so a question and a report look the same wherever they come from.
     """
 
     def on_start(self) -> None:
@@ -29,9 +34,9 @@ class CliUserProxyAgent(UserProxy):
 
     def receiveMsg_UserMessage(self, message: UserMessage, sender: ActorAddress) -> None:
         """Ask the human a question and route the answer back to the asker."""
-        print(f"\n[{_name_of(sender)}] {message.content}")
+        say(_name_of(sender), message.content, style="msg.domain")
         try:
-            answer = input("> ").strip()
+            answer = ask().strip()
         except EOFError:
             answer = ""
 
@@ -39,4 +44,4 @@ class CliUserProxyAgent(UserProxy):
 
     def receiveMsg_ResultMessage(self, message: ResultMessage, sender: ActorAddress) -> None:
         """Show the final answer of the team."""
-        print(f"\n[{_name_of(sender)}] {message.content}")
+        say(_name_of(sender), message.content, style="msg.result")

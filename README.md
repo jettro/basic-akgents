@@ -13,6 +13,10 @@ in [`.junie/guidelines.md`](.junie/guidelines.md).
 - [uv](https://docs.astral.sh/uv/) for dependencies and running
 - `make` for the shortcuts below (optional, every target is a one-line `uv` command)
 
+The runtime dependencies are the framework itself (`akgentic-core`, `akgentic-team`) and
+[rich](https://rich.readthedocs.io) for the console; [ruff](https://docs.astral.sh/ruff/) is the only
+dev-only one.
+
 ```bash
 make sync     # or: uv sync
 ```
@@ -82,6 +86,19 @@ typing `case_1` still starts a team:
 `[ref]` is a number from `teams`, the first characters of a team id, or nothing at all for the team
 used last.
 
+### Colour
+
+The console is a `rich` one: the listings are tables, the shape of a team is a tree, a question and a
+result come in a panel, and the colour says what a thing *is*. A priority runs from bold red
+(`1 - critical`) to green (`4 - low`), a team id is blue, the framework's own telemetry stays grey so
+the conversation stands out from it, and an error is red.
+
+The palette is one `Theme` in `src/basic_akgents/terminal.py`, with names instead of colours
+(`heading`, `priority.critical`, `msg.telemetry`), so the whole demo is repainted in one place. Rich
+drops the colour by itself when stdout is not a terminal and honours `NO_COLOR`, so
+`uv run src/main.py case_1 > run.txt` still gives plain text - and `data/live-feed.log` is written
+without any styling on purpose.
+
 ### Watching the messages
 
 Every team reports every message to its orchestrator, and `EventTap` - a subscriber shared by all
@@ -110,51 +127,76 @@ The scale counts down: `1 - critical | 2 - high | 3 - normal | 4 - low`.
 ```
 $ uv run src/main.py case_2
 
-Event store   : /.../basic-akgents/data
-Live feed     : /.../basic-akgents/data/live-feed.log
-Second panel  : tail -f /.../basic-akgents/data/live-feed.log   (in another terminal)
+╭──────────────────── basic-akgents ────────────────────╮
+│ event store   /.../basic-akgents/data                 │
+│ live feed     /.../basic-akgents/data/live-feed.log   │
+│ second panel  tail -f /.../data/live-feed.log         │
+╰────────────────── one team per case ──────────────────╯
 
-Cases in the case store:
-  case_1 : priority 0 - not set  The printer on the second floor jams on every duplex job
-  ...
+Cases in the case store
+case     priority       description                                             audit
+─────────────────────────────────────────────────────────────────────────────────────────────────
+case_1   0 - not set    The printer on the second floor jams on every duplex job -
+...
 
-Commands:
-  <case id>          Handle a case in a team of its own, e.g. case_1
-  ...
+Commands
+<case id>   Handle a case in a team of its own, e.g. case_1
+...
 
-[@CaseCoordinator] Case case_2
-  description : Mail server is down for the whole department, urgent
-  reported by : jettro
-  proposal    : priority 1 - critical, because the case mentions 'urgent'
-  scale       : 1 - critical | 2 - high | 3 - normal | 4 - low (1 is the most urgent)
-Approve priority 1 - critical? [Enter/y] approve, [n] reject, or type another number (1-4)
+╭─ @CaseCoordinator ─────────────────────────────────────────────────────────────────────────╮
+│ Case case_2                                                                                │
+│   description : Mail server is down for the whole department, urgent                       │
+│   reported by : jettro                                                                     │
+│   proposal    : priority 1 - critical, because the case mentions 'urgent'                  │
+│   scale       : 1 - critical | 2 - high | 3 - normal | 4 - low (1 is the most urgent)      │
+│ Approve priority 1 - critical? [Enter/y] approve, [n] reject, or type another number (1-4) │
+╰────────────────────────────────────────────────────────────────────────────────────────────╯
 >
 
-[@CaseCoordinator] Case case_2 has been triaged.
-  description : Mail server is down for the whole department, urgent
-  priority    : 1 - critical (approved by jettro)
+╭─ @CaseCoordinator ───────────────────────────────────────────────────╮
+│ Case case_2 has been triaged.                                        │
+│   description : Mail server is down for the whole department, urgent │
+│   priority    : 1 - critical (approved by jettro)                    │
+╰──────────────────────────────────────────────────────────────────────╯
 
-[Case case_2] handled, priority 1 - critical
-=== 43 messages, 4 agent states, team 896a6f59-773a-4f26-8e90-9f6a785360bb ===
+╭─ Case case_2 ──────────────────────────────────╮
+│ outcome   handled                              │
+│ priority  1 - critical                         │
+│ team      aaaf6f7a-70da-4249-8b60-083e756786e7 │
+│ recorded  43 messages, 4 agent states          │
+╰────────────────────────────────────────────────╯
 
 (help for the commands) > teams
 
-Teams in the event store:
-   #  team id   status   case       created              card
-   1  896a6f59  stopped  case_2     2026-08-18 20:57:59  case-handling-team
-  Pick one by number or by the first characters of its id.
+Teams in the event store
+#   team id    status    case     created               card
+──────────────────────────────────────────────────────────────────────────
+1   aaaf6f7a   stopped   case_2   2026-08-18 21:50:11   case-handling-team
+Pick one by number or by the first characters of its id.
 
 (help for the commands) > resume 1
 
-[@CaseCoordinator] Case case_2 was not triaged - the case already has priority 1 - critical.
-  ...
-=== 67 messages, 4 agent states, resumed team 896a6f59-773a-4f26-8e90-9f6a785360bb ===
+╭─ @CaseCoordinator ────────────────────────────────────────────────────────╮
+│ Case case_2 was not triaged - the case already has priority 1 - critical. │
+│   description : Mail server is down for the whole department, urgent      │
+│   priority    : 1 - critical                                              │
+╰───────────────────────────────────────────────────────────────────────────╯
+
+╭─ Case case_2 ──────────────────────────────────────╮
+│ outcome       already_prioritised                  │
+│ priority      1 - critical                         │
+│ resumed team  aaaf6f7a-70da-4249-8b60-083e756786e7 │
+│ recorded      67 messages, 4 agent states          │
+╰────────────────────────────────────────────────────╯
 ```
 
+In a real terminal the boxes and columns are coloured: the case id white, `1 - critical` bold red,
+the team id blue, `handled` green.
+
 `card` prints the team from its card, so the shape of a team is visible without starting one. The
-counts at the end come from the orchestrator, which records every message and every state change:
-compare `case_2` (43 messages) with `case_4` (25 messages) to see the "already prioritised" shortcut
-in the telemetry. A resumed team starts at the 43 messages it already had, which is the replayed
+counts in the result panel come from the orchestrator, which records every message and every state
+change: compare `case_2` (43 messages) with `case_4` (25 messages) to see the "already prioritised"
+shortcut in the telemetry. A resumed team starts from the 43 messages it already had, the replayed
 history - visible in `events 1`, invisible in `feed`, because a replay is not something happening now.
 
 ## What happens under the hood
@@ -211,6 +253,7 @@ this session and the guard closes it as `already_prioritised`.
 | `src/basic_akgents/cli/session.py` | `ConsoleSession`, one typed command translated into one call |
 | `src/basic_akgents/cli/prompts.py` | The command catalogue and the parser for a typed line |
 | `src/basic_akgents/cli/console.py` | Every `print` of the demo, including the message renderer |
+| `src/basic_akgents/terminal.py` | The shared `rich` console and the colour theme, used by the agents too |
 | `src/basic_akgents/cli/event_feed.py` | `EventFeed`, drains the tap: tail, live echo, log file |
 | `src/basic_akgents/event_tap.py` | `EventTap`, a subscriber that keeps every message of every team |
 | `src/basic_akgents/case_team_card.py` | `case_team_card`, the whole declaration of a case team |
@@ -244,3 +287,5 @@ this session and the guard closes it as `already_prioritised`.
   bridge; nothing else in the team changes.
 - Ask the orchestrator what `@CaseRepository` did: its state snapshot counts the reads and writes, so
   every touch of the case store is visible in the telemetry.
+- Repaint the demo: change `"priority.critical"` in the theme of `src/basic_akgents/terminal.py` and
+  every place a critical case is printed follows, because nothing outside that file names a colour.

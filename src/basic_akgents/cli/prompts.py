@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from basic_akgents.terminal import ask
+
 # Ways to say "stop", next to Ctrl-D and Ctrl-C.
 QUIT_COMMANDS = ("q", "quit", "exit")
 
@@ -69,7 +71,7 @@ def ask_for_command() -> Command | None:
         The command, or None when the human wants to stop.
     """
     try:
-        line = input("\n(help for the commands) > ")
+        line = ask("\n(help for the commands) > ")
     except (EOFError, KeyboardInterrupt):
         return None
 

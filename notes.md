@@ -493,4 +493,41 @@ serializer would have written the number. Nothing noticed as long as nobody read
 and `resume` did. Gotchas 20-25 in `notes_team.md` have the details, including the `@cache` trap that
 had the console reading a second, empty case store.
 
+#### Colour, and the one place it is allowed to live
+
+The console does a lot of printing now, and a wall of grey text hides exactly what one wants to see:
+which priority, which team, which of the forty messages is the conversation instead of telemetry. So
+[rich](https://rich.readthedocs.io) came in - the only dependency in this repo that is there for
+presentation - and with it tables for the listings, a tree for the shape of a team, a panel around a
+question and around a result, and one colour per kind of message.
+
+Three decisions were worth more than the colours themselves:
+
+- **Name what a thing is, not how it looks.** `basic_akgents/terminal.py` holds one `Theme` with
+  semantic keys - `heading`, `priority.critical`, `status.stopped`, `msg.telemetry` - and nothing
+  outside it ever writes "red". Repainting the demo is one edit in that dictionary, and the printers
+  keep reading as prose: `Text(priority.label, style=_priority_style(priority))`.
+- **The terminal is not part of the front end.** `CliUserProxyAgent` is an agent, and agent code may
+  not import `basic_akgents.cli` - ruff's banned-api rule enforces that, so the console can be swapped
+  for a web UI. But the proxy is the one agent that has to talk to the same terminal. Hence
+  `terminal.py` *next to* the agents: the shared console instance and two helpers (`say`, `ask`), no
+  layout, no domain knowledge. The front end imports it, the proxy imports it, neither imports the
+  other.
+- **Keep a plain copy of everything.** `render_event` returns a `rich.Text`, which carries the styling
+  *and* the bare string: `data/live-feed.log` gets `text.plain`, so `tail -f` in the second terminal
+  shows lines and not escape codes. Rich itself takes care of the other direction - it drops the colour
+  when stdout is not a terminal, and honours `NO_COLOR` - so piping the demo into a file still gives
+  readable text.
+
+Two rich lessons, both found by running it:
+
+- `Text.rstrip()` is not `str.rstrip()`: it edits in place and returns `None`. Returning its result
+  handed a `None` to the feed thread, which only showed up as an `AttributeError` in a background
+  thread - the run itself carried on.
+- A table is the wrong shape for a very wide column. The rendered message line asks for ~150
+  characters, and rich pays for that by shrinking the neighbours: the sequence number and the clock
+  collapsed into an ellipsis, whatever `min_width` or `width` they were given. The event stream is now
+  printed as one soft wrapped line per event, which leaves the wrapping to the terminal; tables stayed
+  where the content is short and column widths mean something.
+
 > Wider notes on the framework (dispatch, telemetry, lifecycle, gotchas) live in `.junie/guidelines.md`.

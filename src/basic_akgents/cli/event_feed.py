@@ -177,5 +177,8 @@ class EventFeed:
             self._log = self.log_path.open("a", encoding="utf-8")
 
         stamp = line.at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
-        self._log.write(f"{stamp} {str(line.team_id)[:8]} {line.text}\n")
+
+        # `.plain` and not the `Text` itself: the file is read with `tail -f`,
+        # which would show the colour codes of the terminal as noise.
+        self._log.write(f"{stamp} {str(line.team_id)[:8]} {line.text.plain}\n")
         self._log.flush()
