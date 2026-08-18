@@ -1,8 +1,8 @@
 """Who is who in a case team, and how a member finds a colleague.
 
-The names below are the single source of truth: `main` puts them on the agent
-cards, and the agents use them to look each other up. Nobody has to be handed
-an address, so a team that is resumed from its card needs no wiring at all.
+The names below are the single source of truth: `case_team_card` puts them on the
+agent cards, and the agents use them to look each other up. Nobody has to be
+handed an address, so a team that is resumed from its card needs no wiring at all.
 """
 
 from __future__ import annotations
