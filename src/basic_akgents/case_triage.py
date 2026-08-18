@@ -1,18 +1,18 @@
 from functools import cached_property
 
-from akgentic.core import Akgent, BaseState, ActorAddress
+from akgentic.core import ActorAddress, Akgent, BaseState
 from akgentic.core.agent import WarningError
 from akgentic.core.messages import Message
 
-from basic_akgents.case_model import CaseConfig, CaseMetaData
+from basic_akgents.case_model import CaseConfig
 from basic_akgents.case_priority import CasePriority
-from basic_akgents.case_team import CASE_REPOSITORY, find_team_member
 from basic_akgents.case_repository_agent import (
     CaseInformationRequest,
     CaseInformationResponse,
     CaseUpdateRequest,
     CaseUpdateResponse,
 )
+from basic_akgents.case_team import CASE_REPOSITORY, find_team_member
 
 URGENT_WORDS = ("urgent", "asap", "immediately", "outage")
 
@@ -20,33 +20,43 @@ URGENT_WORDS = ("urgent", "asap", "immediately", "outage")
 DEFAULT_PRIORITY = CasePriority.NORMAL
 URGENT_PRIORITY = CasePriority.CRITICAL
 
+
 class CaseTriageRequest(Message):
     """Ask triage to assess the case it was configured with."""
-    requester_id:str = ""
+
+    requester_id: str = ""
+
 
 class CaseTriageResponse(Message):
     """Proposal of triage, nothing is stored yet - the human decides."""
-    case_description:str = ""
+
+    case_description: str = ""
     case_sender: str = ""
     case_priority: CasePriority = CasePriority.UNSET
     reason: str = ""
     known_case: bool = False
     already_prioritised: bool = False
 
+
 class CasePriorityDecision(Message):
     """Verdict of the human on the proposed priority."""
+
     approved: bool = False
     case_priority: CasePriority = CasePriority.UNSET
     decided_by: str = ""
 
+
 class CaseTriageCompleted(Message):
     """Triage is done, the decision has been written to the case system."""
+
     case_description: str = ""
     case_priority: CasePriority = CasePriority.UNSET
     approved: bool = False
 
+
 class CaseTriageConfig(CaseConfig):
     pass
+
 
 class CaseTriageState(BaseState):
     known_case: bool = False
@@ -54,6 +64,7 @@ class CaseTriageState(BaseState):
     requester_id: str = ""
     approved: bool = False
     status: str = "new"
+
 
 class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
     """Assesses one case, but never touches the case store itself.
@@ -80,20 +91,26 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
         """Address of the case store owner, resolved on the first request."""
         return find_team_member(self, CASE_REPOSITORY)
 
-    def receiveMsg_CaseTriageRequest(self, message: CaseTriageRequest, sender: ActorAddress) -> None:
+    def receiveMsg_CaseTriageRequest(
+        self, message: CaseTriageRequest, sender: ActorAddress
+    ) -> None:
         """Ask the repository for the case; the assessment follows on its answer."""
         self.reply_to = sender
 
         print("CaseTriageRequest received")
 
-        self.update_state({
-            "status": "loading",
-            "requester_id": message.requester_id or "unknown",
-        })
+        self.update_state(
+            {
+                "status": "loading",
+                "requester_id": message.requester_id or "unknown",
+            }
+        )
 
         self.send(self.repository_agent, CaseInformationRequest(case_id=self.config.case_id))
 
-    def receiveMsg_CaseInformationResponse(self, message: CaseInformationResponse, sender: ActorAddress) -> None:
+    def receiveMsg_CaseInformationResponse(
+        self, message: CaseInformationResponse, sender: ActorAddress
+    ) -> None:
         """Assess the case and propose a priority, without storing it yet."""
         if self.state.status != "loading":
             # No request of ours is open, so this answer is not ours to act on.
@@ -115,8 +132,13 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
         # Only new cases are triaged: a priority that is already there was
         # decided on before and is not ours to overwrite.
         if case.case_priority.is_set:
-            self.update_state({"status": "already_prioritised", "known_case": True,
-                               "proposed_priority": case.case_priority})
+            self.update_state(
+                {
+                    "status": "already_prioritised",
+                    "known_case": True,
+                    "proposed_priority": case.case_priority,
+                }
+            )
             self._reply(
                 CaseTriageResponse(
                     case_description=case.case_description,
@@ -146,7 +168,9 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
             )
         )
 
-    def receiveMsg_CasePriorityDecision(self, message: CasePriorityDecision, sender: ActorAddress) -> None:
+    def receiveMsg_CasePriorityDecision(
+        self, message: CasePriorityDecision, sender: ActorAddress
+    ) -> None:
         """Hand the decision of the human to the agent that owns the case."""
         self.reply_to = sender
 
@@ -161,8 +185,7 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
             # repository to leave the stored priority alone.
             case_priority = CasePriority.UNSET
             action = (
-                f"proposed priority {self.state.proposed_priority.label} "
-                f"rejected by {decided_by}"
+                f"proposed priority {self.state.proposed_priority.label} rejected by {decided_by}"
             )
 
         self.update_state({"status": "storing", "approved": message.approved})
@@ -176,7 +199,9 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
             ),
         )
 
-    def receiveMsg_CaseUpdateResponse(self, message: CaseUpdateResponse, sender: ActorAddress) -> None:
+    def receiveMsg_CaseUpdateResponse(
+        self, message: CaseUpdateResponse, sender: ActorAddress
+    ) -> None:
         """Report the stored outcome once the repository wrote the decision."""
         if self.state.status != "storing":
             return
@@ -184,7 +209,9 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
         case = message.case
 
         if not message.found or case is None:
-            raise WarningError(f"Case {self.config.case_id} disappeared before the decision was stored.")
+            raise WarningError(
+                f"Case {self.config.case_id} disappeared before the decision was stored."
+            )
 
         approved = self.state.approved
 

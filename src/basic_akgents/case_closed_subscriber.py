@@ -51,7 +51,7 @@ class CaseClosedSubscriber(EventSubscriber):
 
         self._closed.put((msg.team_id, msg.event))
 
-    def set_restoring(self, team_id: uuid.UUID, restoring: bool) -> None:  # noqa: FBT001
+    def set_restoring(self, team_id: uuid.UUID, restoring: bool) -> None:
         """Keep replayed history out of the queue.
 
         Args:

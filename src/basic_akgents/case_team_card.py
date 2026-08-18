@@ -8,10 +8,14 @@ later from the same description.
 
 from __future__ import annotations
 
-from akgentic.core import AgentCard, BaseConfig, UserProxy
+from akgentic.core import AgentCard, BaseConfig
 from akgentic.team import TeamCard, TeamCardMember
 
-from basic_akgents.case_coordinator import CaseCoordinatorAgent, CaseCoordinatorConfig, HandleCaseRequest
+from basic_akgents.case_coordinator import (
+    CaseCoordinatorAgent,
+    CaseCoordinatorConfig,
+    HandleCaseRequest,
+)
 from basic_akgents.case_model import CaseMetaData
 from basic_akgents.case_repository import DEFAULT_CASE_REPOSITORY
 from basic_akgents.case_repository_agent import CaseRepositoryAgent, CaseRepositoryConfig
@@ -27,9 +31,10 @@ ANY_CASE_ID = "<case id>"
 def case_team_card(case_id: str) -> TeamCard:
     """Describe the team that handles a single case.
 
-    The human bridge is passed in rather than hard-coded, so this description
-    stays free of any console code: a CLI hands in its stdin proxy, a web front
-    end would hand in its own.
+    The human bridge belongs to the description, so it is named here instead of
+    being passed in: the case id is the only thing that differs between two case
+    teams. A front end other than the console gets a card function of its own,
+    which keeps the callers free of boilerplate they have nothing to decide in.
 
     Args:
         case_id: Case every agent of the team works on.
@@ -72,7 +77,9 @@ def case_team_card(case_id: str) -> TeamCard:
 
     triage_member = TeamCardMember(card=triage_agent_card)
     repository_member = TeamCardMember(card=repository_agent_card)
-    coordinator_member = TeamCardMember(card=coordinator_card, members=[triage_member, repository_member])
+    coordinator_member = TeamCardMember(
+        card=coordinator_card, members=[triage_member, repository_member]
+    )
     human_member = TeamCardMember(card=proxy_card)
 
     return TeamCard(

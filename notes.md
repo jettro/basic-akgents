@@ -42,6 +42,7 @@ Declaring it:
 ```python
 class CaseConfig(BaseConfig):
     """Config shared by every agent working on a single case."""
+
     case_id: str = ReadOnlyField(frozen=True)
 ```
 
@@ -92,15 +93,16 @@ When the agents are created *outside* the agent that has to talk to them, declar
 `proxy_tell(coordinator, CaseCoordinator).set_agents(...)`:
 
 ```python
-    def on_start(self) -> None:
-        ...
-        self.information_agent: ActorAddress | None = None
-        self.user_proxy: ActorAddress | None = None
+def on_start(self) -> None:
+    ...
+    self.information_agent: ActorAddress | None = None
+    self.user_proxy: ActorAddress | None = None
 
-    def set_agents(self, information_agent: ActorAddress, user_proxy: ActorAddress) -> None:
-        """Set references to other agents for routing."""
-        self.information_agent = information_agent
-        self.user_proxy = user_proxy
+
+def set_agents(self, information_agent: ActorAddress, user_proxy: ActorAddress) -> None:
+    """Set references to other agents for routing."""
+    self.information_agent = information_agent
+    self.user_proxy = user_proxy
 ```
 
 Other ways to get hold of an address:
@@ -114,7 +116,7 @@ If a snapshot really needs to record the link, store the **name** in the state
 Talking to them once wired:
 
 ```python
-self.send(self.triage_agent, CaseSubmitted(...))   # normal path, keeps thread + telemetry
+self.send(self.triage_agent, CaseSubmitted(...))  # normal path, keeps thread + telemetry
 ```
 
 And do not reach into these attributes from outside the actor
@@ -245,7 +247,7 @@ class CaseRepository(Protocol):
     def save_case(self, case: Case) -> None: ...
 
 
-class DummyCaseRepository:          # no inheritance needed
+class DummyCaseRepository:  # no inheritance needed
     def load_case(self, case_id: str) -> Case: ...
     def save_case(self, case: Case) -> None: ...
 ```
@@ -400,12 +402,13 @@ case data became a conversation:
 
 ```python
 class CaseInformationRequest(Message):
-    case_id: str = ""                      # empty means "the case of this team"
+    case_id: str = ""  # empty means "the case of this team"
+
 
 class CaseInformationResponse(Message):
     case_id: str = ""
     found: bool = False
-    case: Case | None = None               # the whole case travels along
+    case: Case | None = None  # the whole case travels along
 ```
 
 A `Case` is a plain `pydantic.BaseModel`, so it may sit inside a `Message`: the serializer turns a
@@ -418,8 +421,8 @@ Writes got their own pair, and that is where the payoff is:
 ```python
 class CaseUpdateRequest(Message):
     case_id: str = ""
-    case_priority: CasePriority = CasePriority.UNSET   # UNSET: leave the priority alone
-    action: str = ""                                   # line for the audit log
+    case_priority: CasePriority = CasePriority.UNSET  # UNSET: leave the priority alone
+    action: str = ""  # line for the audit log
 ```
 
 The request describes the **intent**, not the result, so load -> change -> save happens inside a single
@@ -440,7 +443,7 @@ Which means triage now has to remember what it was doing, and that is a `status`
 
 ```python
 if self.state.status != "loading":
-    return          # no request of ours is open, this answer is not ours to act on
+    return  # no request of ours is open, this answer is not ours to act on
 ```
 
 Same trick as the coordinator's `awaiting_approval`: **an actor waits in its state, never in its

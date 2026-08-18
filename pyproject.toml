@@ -22,16 +22,49 @@ build-backend = "uv_build"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+# src layout: tells the isort rules that `basic_akgents` is first-party.
+src = ["src"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "UP", "ANN", "ASYNC", "C901", "PLR0912", "PLR0915"]
-ignore = ["E501", "ANN401", "N802"]
+select = [
+    "E", # pycodestyle errors
+    "F", # pyflakes
+    "I", # isort
+    "N", # pep8-naming
+    "UP", # pyupgrade
+    "ANN", # flake8-annotations
+    "ASYNC", # flake8-async
+    "B", # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "PTH", # flake8-use-pathlib
+    "TID", # flake8-tidy-imports
+    "RUF", # ruff-specific rules
+    "C901", # mccabe: too complex
+    "PLR0912", # too many branches
+    "PLR0915", # too many statements
+]
+ignore = [
+    "E501", # line length is handled by the formatter
+    "ANN401", # `Any` is unavoidable in the framework's message handlers
+    "N802", # `receiveMsg_*` / `createActor` are the framework's v1 API names
+]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["ANN"]  # skip annotation rules in test files
-# TYPE_CHECKING block re-exports the lazily-imported public API for type
-# checkers/IDEs; the names are intentionally not referenced at runtime.
-"src/ingestion_core/__init__.py" = ["F401"]
+"tests/**" = ["ANN"] # skip annotation rules in test files
+# The two places that are allowed to import the console front end: the front end
+# itself and the launcher that starts it.
+"src/basic_akgents/cli/**" = ["TID251"]
+"src/main.py" = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+# The dependency between the agent code and the console runs one way only: the
+# front end drives the agents, the agents never reach back into it. Swapping the
+# console for a web UI then stays a change inside `basic_akgents.cli`.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"basic_akgents.cli".msg = "the agent code must not import the console front end - only `basic_akgents.cli` itself and `src/main.py` may"
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
@@ -39,3 +72,11 @@ max-complexity = 10
 [tool.ruff.lint.pylint]
 max-branches = 12
 max-statements = 50
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14",
+]

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 
-from akgentic.core import ActorSystem, UserProxy
+from akgentic.core import ActorSystem
 from akgentic.team import TeamManager, YamlEventStore
 
 from basic_akgents.case_closed_subscriber import CaseClosedSubscriber, ClosedQueue
@@ -63,17 +63,14 @@ class CaseRunner:
     def __init__(
         self,
         event_store_dir: Path,
-        proxy_class: type[UserProxy],
         timeout_seconds: float = CASE_TIMEOUT_SECONDS,
     ) -> None:
         """Start the actor system and the manager that owns the teams.
 
         Args:
             event_store_dir: Directory the event streams of the teams land in.
-            proxy_class: `UserProxy` subclass the teams talk to the human with.
             timeout_seconds: How long a case may take before it is given up on.
         """
-        self._proxy_class = proxy_class
         self._timeout_seconds = timeout_seconds
 
         # Filled by the subscriber on the actor thread of an orchestrator, read

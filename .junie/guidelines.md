@@ -73,7 +73,7 @@ Canonical `on_start`:
 ```python
 def on_start(self) -> None:
     self.state = CaseCoordinatorState()
-    self.state.observer(self)   # attaches observer AND fires the first notification
+    self.state.observer(self)  # attaches observer AND fires the first notification
 ```
 
 ---
@@ -108,6 +108,7 @@ from akgentic.core.agent_config import ReadOnlyField
 
 class CaseConfig(BaseConfig):
     """Config shared by every agent working on a single case."""
+
     case_id: str = ReadOnlyField(frozen=True)
 ```
 
@@ -141,9 +142,9 @@ subscriber consumes `StateChangedMessage` snapshots and cannot see the `StartMes
 
 ```python
 self.state.field = value
-self.state.notify_state_change()      # must be called explicitly after mutation
+self.state.notify_state_change()  # must be called explicitly after mutation
 # or, in one go:
-self.update_state({"field": value})   # merge + rebuild + notify
+self.update_state({"field": value})  # merge + rebuild + notify
 ```
 
 - `state.observer(self)` attaches the agent as observer **and** fires an immediate notification.
@@ -166,8 +167,7 @@ Define your own message types by subclassing `Message`; they serialize via `Seri
 ### Handlers
 
 ```python
-def receiveMsg_CaseSubmitted(self, message: CaseSubmitted, sender: ActorAddress) -> None:
-    ...
+def receiveMsg_CaseSubmitted(self, message: CaseSubmitted, sender: ActorAddress) -> None: ...
 ```
 
 - Dispatch walks the **message MRO** and, for each match, the **actor MRO** — so a handler for a base
@@ -236,8 +236,10 @@ Since all agents here work on one case, use a shared base config:
 class CaseConfig(BaseConfig):
     case_id: str = ReadOnlyField(frozen=True)
 
+
 class CaseTriageConfig(CaseConfig):
     max_tags: int = 5
+
 
 triage = self.createActor(
     CaseTriage,
@@ -300,12 +302,15 @@ hand out copies (`model_copy(deep=True)`); blocking I/O inside them blocks that 
 `src/basic_akgents/cli_user_proxy.py` — `CliUserProxyAgent(UserProxy)`:
 
 - `receiveMsg_UserMessage` prints the question, reads `input()` and calls `process_human_input(...)`.
-- `receiveMsg_ResultMessage` prints the final answer and sets a `threading.Event`, so `main` waits on
-  that event instead of `time.sleep(...)`. The event is handed over by reference with
-  `actor_system.proxy_tell(proxy_addr, CliUserProxyAgent).set_completion_event(event)` — never through
-  config or state, which are serialized.
-- The proxy is created by the coordinator (`coordinator.createActor(...)`) so it is a team member with
-  telemetry, and its address is injected together with the others via `set_agents`.
+- `receiveMsg_ResultMessage` only prints the final answer. Nothing is handed to this agent: the end of
+  a case is announced as a `CaseClosed` event, which `CaseClosedSubscriber` puts on a queue the console
+  loop waits on — so the `threading.Event` setter of the earlier version is gone.
+- The proxy is a member of the team card (`case_team_card`, as its `entry_point`), which makes it a
+  team member with telemetry and lets `TeamRuntime.process_human_input` route to it.
+- **The proxy class is named in `case_team_card` itself, not passed in by a caller.** A `TeamCard` is
+  the full description of a team, and `case_id` is the only thing that differs between two case teams;
+  threading a `proxy_class` argument through `CaseRunner` and the console app only adds boilerplate to
+  callers that have nothing to decide. A different front end writes its own card function instead.
 - `input()` blocks the proxy's actor thread; acceptable for a console demo only.
 
 End-to-end flow: `HandleCaseRequest` → coordinator sends `CaseTriageRequest` → triage answers with a
@@ -418,4 +423,9 @@ next run; an approval writes the priority and from then on the same guard refuse
   (they are v1-compatibility API); use `snake_case` for your own code.
 - One config class per agent, all inheriting a shared `CaseConfig`.
 - One state class per agent, even when empty — makes later growth painless.
-- Run things with `uv run`; add dependencies with `uv add`.
+- Run things with `uv run`; add dependencies with `uv add` (dev tools with `uv add --dev`).
+- The `Makefile` wraps the everyday commands: `make sync`, `make run CASE=case_2`, `make lint`,
+  `make format`, `make check` (lint + format check, run it before committing), `make clean`.
+- Quality gate is **ruff** only (dev-only dependency, configured in `pyproject.toml`): lint plus
+  formatter, line length 100, `E501` off because the formatter owns wrapping, `N802` off because the
+  framework's `receiveMsg_*` / `createActor` names are camelCase on purpose.

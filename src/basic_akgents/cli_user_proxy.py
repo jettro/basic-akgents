@@ -27,7 +27,7 @@ class CliUserProxyAgent(UserProxy):
         self.state = BaseState()
         self.state.observer(self)
 
-    def receiveMsg_UserMessage(self, message: UserMessage, sender: ActorAddress) -> None:  # noqa: N802
+    def receiveMsg_UserMessage(self, message: UserMessage, sender: ActorAddress) -> None:
         """Ask the human a question and route the answer back to the asker."""
         print(f"\n[{_name_of(sender)}] {message.content}")
         try:
@@ -37,6 +37,6 @@ class CliUserProxyAgent(UserProxy):
 
         self.process_human_input(answer, message)
 
-    def receiveMsg_ResultMessage(self, message: ResultMessage, sender: ActorAddress) -> None:  # noqa: N802
+    def receiveMsg_ResultMessage(self, message: ResultMessage, sender: ActorAddress) -> None:
         """Show the final answer of the team."""
         print(f"\n[{_name_of(sender)}] {message.content}")

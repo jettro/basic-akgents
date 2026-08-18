@@ -9,8 +9,13 @@ from akgentic.core.messages import Message
 
 from basic_akgents.case_model import CaseConfig
 from basic_akgents.case_priority import CasePriority
-from basic_akgents.case_repository import Case, CaseNotFoundError, CaseRepository, DEFAULT_CASE_REPOSITORY, \
-    build_case_repository
+from basic_akgents.case_repository import (
+    DEFAULT_CASE_REPOSITORY,
+    Case,
+    CaseNotFoundError,
+    CaseRepository,
+    build_case_repository,
+)
 
 
 class CaseInformationRequest(Message):
@@ -19,7 +24,9 @@ class CaseInformationRequest(Message):
     Attributes:
         case_id: Case to look up, empty means the case of the team.
     """
+
     case_id: str = ""
+
 
 class CaseInformationResponse(Message):
     """The case as it is stored right now.
@@ -29,9 +36,11 @@ class CaseInformationResponse(Message):
         found: Whether the case system knows this case at all.
         case: The stored case, None when it is unknown.
     """
+
     case_id: str = ""
     found: bool = False
     case: Case | None = None
+
 
 class CaseUpdateRequest(Message):
     """Ask the repository agent to record a decision on a case.
@@ -44,9 +53,11 @@ class CaseUpdateRequest(Message):
         case_priority: Priority to store, `UNSET` leaves the current one alone.
         action: Line to append to the audit log, empty appends nothing.
     """
+
     case_id: str = ""
     case_priority: CasePriority = CasePriority.UNSET
     action: str = ""
+
 
 class CaseUpdateResponse(Message):
     """The case as it is stored after the update.
@@ -56,9 +67,11 @@ class CaseUpdateResponse(Message):
         found: Whether the case system knows this case at all.
         case: The stored case after the write, None when it is unknown.
     """
+
     case_id: str = ""
     found: bool = False
     case: Case | None = None
+
 
 class CaseRepositoryConfig(CaseConfig):
     """Config of the case store owner.
@@ -66,14 +79,18 @@ class CaseRepositoryConfig(CaseConfig):
     Attributes:
         backend: Dotted path of the `CaseRepository` implementation to use.
     """
+
     backend: str = DEFAULT_CASE_REPOSITORY
+
 
 class CaseRepositoryState(BaseState):
     """Traffic to the store, so the telemetry shows who reads and writes."""
+
     reads: int = 0
     writes: int = 0
     last_case_id: str = ""
     status: str = "ready"
+
 
 class CaseRepositoryAgent(Akgent[CaseRepositoryConfig, CaseRepositoryState]):
     """Single owner of the case store.
@@ -94,23 +111,29 @@ class CaseRepositoryAgent(Akgent[CaseRepositoryConfig, CaseRepositoryState]):
 
         self.state.observer(self)
 
-    def receiveMsg_CaseInformationRequest(self, message: CaseInformationRequest, sender: ActorAddress) -> None:
+    def receiveMsg_CaseInformationRequest(
+        self, message: CaseInformationRequest, sender: ActorAddress
+    ) -> None:
         """Answer with the case as it is stored."""
         case_id = message.case_id or self.config.case_id
         case = self._load(case_id)
 
-        self.update_state({
-            "reads": self.state.reads + 1,
-            "last_case_id": case_id,
-            "status": "ready" if case is not None else "unknown_case",
-        })
+        self.update_state(
+            {
+                "reads": self.state.reads + 1,
+                "last_case_id": case_id,
+                "status": "ready" if case is not None else "unknown_case",
+            }
+        )
 
         self.send(
             sender,
             CaseInformationResponse(case_id=case_id, found=case is not None, case=case),
         )
 
-    def receiveMsg_CaseUpdateRequest(self, message: CaseUpdateRequest, sender: ActorAddress) -> None:
+    def receiveMsg_CaseUpdateRequest(
+        self, message: CaseUpdateRequest, sender: ActorAddress
+    ) -> None:
         """Apply a decision to the case and answer with the stored result."""
         case_id = message.case_id or self.config.case_id
         case = self._load(case_id)
@@ -118,11 +141,13 @@ class CaseRepositoryAgent(Akgent[CaseRepositoryConfig, CaseRepositoryState]):
         if case is not None:
             case = self._apply(case, message)
 
-        self.update_state({
-            "writes": self.state.writes + 1,
-            "last_case_id": case_id,
-            "status": "ready" if case is not None else "unknown_case",
-        })
+        self.update_state(
+            {
+                "writes": self.state.writes + 1,
+                "last_case_id": case_id,
+                "status": "ready" if case is not None else "unknown_case",
+            }
+        )
 
         self.send(
             sender,

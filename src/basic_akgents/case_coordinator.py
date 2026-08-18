@@ -19,7 +19,8 @@ APPROVALS = ("", "y", "yes", "ok", "approve", "approved")
 
 
 class HandleCaseRequest(Message):
-    requester_id:str = ""
+    requester_id: str = ""
+
 
 class CaseCoordinatorState(BaseState):
     status: str = "new"
@@ -27,8 +28,10 @@ class CaseCoordinatorState(BaseState):
     case_description: str = ""
     proposed_priority: CasePriority = CasePriority.UNSET
 
+
 class CaseCoordinatorConfig(CaseConfig):
     pass
+
 
 class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
     """Runs the case from request to answer, without owning any of the work.
@@ -40,7 +43,7 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
 
     def on_start(self) -> None:
         """Initialize the case coordinator."""
-        self.state = CaseCoordinatorState() # Initialize the first state object
+        self.state = CaseCoordinatorState()  # Initialize the first state object
         self.state.observer(self)
 
     @cached_property
@@ -53,12 +56,16 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
         """Address of the human bridge, resolved on the first question."""
         return find_team_member(self, USER_PROXY)
 
-    def receiveMsg_HandleCaseRequest(self, message: HandleCaseRequest, sender: ActorAddress) -> None:
+    def receiveMsg_HandleCaseRequest(
+        self, message: HandleCaseRequest, sender: ActorAddress
+    ) -> None:
         """Start the case by having it triaged, everything we need is in the case."""
         self.update_state({"status": "triaging", "requester_id": message.requester_id})
         self.send(self.triage_agent, CaseTriageRequest(requester_id=message.requester_id))
 
-    def receiveMsg_CaseTriageResponse(self, message: CaseTriageResponse, sender: ActorAddress) -> None:
+    def receiveMsg_CaseTriageResponse(
+        self, message: CaseTriageResponse, sender: ActorAddress
+    ) -> None:
         """Put the proposed priority in front of the human for approval."""
         if not message.known_case:
             self.update_state({"status": "unknown"})
@@ -71,11 +78,13 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
 
         if message.already_prioritised:
             # Nothing to approve: only cases without a priority are triaged.
-            self.update_state({
-                "status": "already_prioritised",
-                "case_description": message.case_description,
-                "proposed_priority": message.case_priority,
-            })
+            self.update_state(
+                {
+                    "status": "already_prioritised",
+                    "case_description": message.case_description,
+                    "proposed_priority": message.case_priority,
+                }
+            )
             self._close(
                 f"Case {self.config.case_id} was not triaged - {message.reason}.\n"
                 f"  description : {message.case_description}\n"
@@ -85,11 +94,13 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
             )
             return
 
-        self.update_state({
-            "status": "awaiting_approval",
-            "case_description": message.case_description,
-            "proposed_priority": message.case_priority,
-        })
+        self.update_state(
+            {
+                "status": "awaiting_approval",
+                "case_description": message.case_description,
+                "proposed_priority": message.case_priority,
+            }
+        )
 
         self._ask(
             f"Case {self.config.case_id}\n"
@@ -121,7 +132,9 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
             ),
         )
 
-    def receiveMsg_CaseTriageCompleted(self, message: CaseTriageCompleted, sender: ActorAddress) -> None:
+    def receiveMsg_CaseTriageCompleted(
+        self, message: CaseTriageCompleted, sender: ActorAddress
+    ) -> None:
         """Report the recorded outcome of the triage back to the human."""
         if message.approved:
             self.update_state({"status": "handled"})

@@ -21,7 +21,9 @@ EVENT_STORE_DIR = PROJECT_ROOT / "data"
 
 def parse_args() -> argparse.Namespace:
     """Read the first case id from the command line, or ask for it."""
-    parser = argparse.ArgumentParser(description="Handle cases with a team of agents, one team per case.")
+    parser = argparse.ArgumentParser(
+        description="Handle cases with a team of agents, one team per case."
+    )
     parser.add_argument("case_id", nargs="?", help="Identifier of the case to start with.")
     return parser.parse_args()
 

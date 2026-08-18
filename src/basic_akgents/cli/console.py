@@ -65,6 +65,10 @@ def print_case_result(result: CaseRunResult) -> None:
     if result.event is None:
         print(f"\n[Case {result.case_id}] Timed out waiting for the case to be handled.")
     else:
-        print(f"\n[Case {result.event.case_id}] {result.event.outcome}, priority {result.event.case_priority.label}")
+        print(
+            f"\n[Case {result.event.case_id}] {result.event.outcome}, priority {result.event.case_priority.label}"
+        )
 
-    print(f"=== {result.message_count} messages, {result.state_count} agent states, team {result.team_id} ===")
+    print(
+        f"=== {result.message_count} messages, {result.state_count} agent states, team {result.team_id} ==="
+    )

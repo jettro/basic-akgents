@@ -12,5 +12,8 @@ wheels/
 # IDE files
 .idea
 
+# Tooling caches
+.ruff_cache/
+
 # Runtime data (event store)
 data/

@@ -36,6 +36,7 @@ class CaseNotFoundError(LookupError):
 # in the team card and survives a resume.
 DEFAULT_CASE_REPOSITORY = "basic_akgents.case_repository.DummyCaseRepository"
 
+
 @cache
 def build_case_repository(backend: str = DEFAULT_CASE_REPOSITORY) -> CaseRepository:
     """Create the case backend named by a dotted path.
