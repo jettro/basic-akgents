@@ -2,18 +2,28 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterable
 from functools import cache
 from typing import Protocol, runtime_checkable
 
 from akgentic.core.utils import import_class
-from pydantic import BaseModel, Field
+from akgentic.core.utils.serializer import SerializableBaseModel
+from pydantic import Field
 
 from basic_akgents.case_priority import CasePriority
 
 
-class Case(BaseModel):
+class Case(SerializableBaseModel):
     """A single case as stored in the case system.
+
+    A `SerializableBaseModel` and not a plain `BaseModel`, because a case travels
+    inside a message (`CaseInformationResponse`) and every message is persisted.
+    The framework's serializer walks such a model field by field - which turns
+    the `CasePriority` into the plain number the event store can read back - and
+    writes the class path, so replay hands the agent a real `Case` again. A plain
+    `BaseModel` is dumped by pydantic itself, keeps the enum object, and makes
+    the YAML stream of the team unreadable: `resume` then finds no history.
 
     Attributes:
         case_id: Identifier of the case, fixed for its lifetime.
@@ -38,12 +48,8 @@ DEFAULT_CASE_REPOSITORY = "basic_akgents.case_repository.DummyCaseRepository"
 
 
 @cache
-def build_case_repository(backend: str = DEFAULT_CASE_REPOSITORY) -> CaseRepository:
-    """Create the case backend named by a dotted path.
-
-    One instance per backend path: the in-memory store must not be re-seeded
-    when a team is resumed, and a database client should be pooled, not
-    duplicated per agent.
+def _case_repository(backend: str) -> CaseRepository:
+    """Build the backend named by a dotted path, once per path.
 
     Args:
         backend: Fully qualified path of a `CaseRepository` implementation.
@@ -60,6 +66,32 @@ def build_case_repository(backend: str = DEFAULT_CASE_REPOSITORY) -> CaseReposit
         raise TypeError(f"{backend!r} does not implement CaseRepository")
 
     return repository
+
+
+def build_case_repository(backend: str = DEFAULT_CASE_REPOSITORY) -> CaseRepository:
+    """Create the case backend named by a dotted path.
+
+    One instance per backend path: the in-memory store must not be re-seeded
+    when a team is resumed, and a database client should be pooled, not
+    duplicated per agent.
+
+    The cache sits on the private function that has no default, because `@cache`
+    keys on the call and not on the resolved arguments: with the cache out here,
+    `build_case_repository()` from the console and
+    `build_case_repository(DEFAULT_CASE_REPOSITORY)` from `@CaseRepository` would
+    be two keys - and two stores, so the console would show priorities that the
+    team never wrote.
+
+    Args:
+        backend: Fully qualified path of a `CaseRepository` implementation.
+
+    Returns:
+        The backend to work with.
+
+    Raises:
+        TypeError: If the resolved class is not a `CaseRepository`.
+    """
+    return _case_repository(backend)
 
 
 @runtime_checkable
@@ -82,6 +114,14 @@ class CaseRepository(Protocol):
 
         Raises:
             CaseNotFoundError: If no case exists for this id.
+        """
+        ...
+
+    def list_cases(self) -> list[Case]:
+        """List every case the backend holds.
+
+        Returns:
+            All stored cases, ordered by case id.
         """
         ...
 
@@ -127,10 +167,11 @@ DEMO_CASES: tuple[Case, ...] = (
 class DummyCaseRepository:
     """In-memory `CaseRepository`, seeded with a few demo cases.
 
-    Exactly one agent owns this store: `CaseRepositoryAgent` holds it and its
-    handlers run one at a time in that agent's own thread, so no lock is needed.
-    Hand it to a second agent and that guarantee is gone - then the
-    implementation has to be thread safe again.
+    Exactly one agent *writes* this store: `CaseRepositoryAgent` holds it and its
+    handlers run one at a time in that agent's own thread, so read-modify-write
+    is atomic without help. The console reads the same instance to list the cases
+    while a team may still be running, and that second thread is why every
+    access takes a lock.
 
     Copies go in and out (`model_copy(deep=True)`), so a caller can never mutate
     what is stored by accident.
@@ -142,6 +183,7 @@ class DummyCaseRepository:
         Args:
             cases: Cases to start with, defaults to `DEMO_CASES`.
         """
+        self._lock = threading.Lock()
         self._cases: dict[str, Case] = {
             case.case_id: case.model_copy(deep=True)
             for case in (DEMO_CASES if cases is None else cases)
@@ -159,7 +201,8 @@ class DummyCaseRepository:
         Raises:
             CaseNotFoundError: If no case exists for this id.
         """
-        case = self._cases.get(case_id)
+        with self._lock:
+            case = self._cases.get(case_id)
 
         if case is None:
             raise CaseNotFoundError(f"No case found for id {case_id!r}")
@@ -172,4 +215,16 @@ class DummyCaseRepository:
         Args:
             case: The case to persist.
         """
-        self._cases[case.case_id] = case.model_copy(deep=True)
+        with self._lock:
+            self._cases[case.case_id] = case.model_copy(deep=True)
+
+    def list_cases(self) -> list[Case]:
+        """List every case the store holds.
+
+        Returns:
+            Copies of all stored cases, ordered by case id.
+        """
+        with self._lock:
+            cases = list(self._cases.values())
+
+        return [case.model_copy(deep=True) for case in sorted(cases, key=lambda c: c.case_id)]

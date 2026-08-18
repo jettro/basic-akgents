@@ -71,3 +71,15 @@ resume_team replays history through the subscribers, so a reacting subscriber ha
 runtime.id == team_id, and stop_team waits for the full drain — which doubles as the barrier that keeps the last console output of a team out of the next prompt. Stop the old team before creating the next one, or two @UserProxy actors compete for stdin.
 19.
 With a domain event as the completion signal the threading.Event setter disappears: a created and a resumed team now need no post-create wiring at all. main creates one team per case in a loop, waits on the queue filtered by team_id, and decides itself whether the next case follows or the CLI closes.
+20.
+Anything that travels inside a message must be a SerializableBaseModel, never a plain pydantic BaseModel. YamlEventStore dumps with yaml.Dumper (which happily writes python/object tags) and reads with safe_load, so a value it cannot read back makes the *whole* events.yaml unreadable: load_events() returns [] and resume_team dies with "No Orchestrator StartMessage found". The framework's serialize() walks a SerializableBaseModel field by field and turns an IntEnum into a plain number; pydantic's own model_dump() keeps the enum object. `Case` was a BaseModel and cost exactly this.
+21.
+The reading side of a team is the EventStore, not the TeamManager: list_teams(user_id=, status=, metadata=), load_team, load_events, load_agent_states, get_max_sequence. The manager only creates, gets, resumes, stops, deletes and updates metadata — so keep the store instance you pass in if you want to list teams. list_teams returns DELETED ones too unless you filter on status.
+22.
+A stopped team can be described in full without any actor being alive: Process carries the team_card (so the structure is there), the metadata plus its flattened metadata_indexes, the status, the owner and the timestamps, and the store has the events and one state snapshot per agent next to it.
+23.
+resume_team replays into the orchestrator and the subscribers, not into the agent handlers: state snapshots are pushed back with init_state and the history is restored as history, so a resumed team does not repeat its conversation and the human is not asked the old questions again. Hand it a fresh message to make it work. The message count starts at what it was (43 -> 67 for a second run), because the replayed history counts.
+24.
+StateChangedMessage never reaches events.yaml: the PersistenceSubscriber turns it into an AgentStateSnapshot, one per agent, overwritten. A live tap on on_message sees every state change, the stored stream only what was sent, received, processed and notified — worth knowing before comparing the two.
+25.
+Not a team thing but it bit here anyway: @cache keys on the call, not on the resolved arguments. build_case_repository() and build_case_repository(DEFAULT_CASE_REPOSITORY) are two cache entries and therefore two stores — the console then reads a store no agent ever writes to. Put the cache on a private function that has no default.

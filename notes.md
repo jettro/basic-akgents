@@ -464,4 +464,33 @@ The price in messages is visible in the summary: a full run went from 27 to 40 m
 "already prioritised" shortcut from 15 to 22. That is the cost of making every case access an
 observable event - and worth it the moment a second agent starts writing.
 
+#### A console that can look around, not only ask for a case
+
+The prompt used to have one question ("case id?"), which meant everything the framework keeps around
+a team was invisible. It now has a small verb per thing to look at: `cases` for the store, `teams` for
+the event store, `team` for one of them in full, `events` for its stored stream, `feed` for what is
+happening now, `resume` to put a stopped team back to work. An unknown verb is still read as a case id,
+so the old habit of typing `case_1` costs nothing.
+
+Two things this made obvious:
+
+- **A stopped team is a readable team.** `Process` keeps the card it was created from, so the structure
+  of a team can be printed months later, and the store keeps the event stream plus one state snapshot
+  per agent next to it. Nothing has to be alive for a UI to describe a team - and `resume_team` builds
+  the same team back out of exactly that, replaying the history *as history*: subscribers see it,
+  agents do not, so nobody is asked the old questions again.
+- **The console layer is where a "second panel" problem lives, not the framework.** A subscriber sees
+  every message of every team (`EventTap`), and one terminal cannot show a stream and a prompt at the
+  same time. So the tap only *transports* - a `queue.Queue`, like `CaseClosedSubscriber` - and the
+  console offers three ways to look: a tail afterwards (`feed`), an echo while it happens (`follow`),
+  and one line per message appended to `data/live-feed.log`, which `tail -f` in a second terminal turns
+  into the panel of its own. No TUI, no dependency.
+
+The two reading commands walked straight into a bug the demo had been hiding: the stored event stream was
+written in a form the store cannot read back, because `Case` was a plain pydantic model travelling
+inside a message, and pydantic's `model_dump()` keeps a `CasePriority` where the framework's own
+serializer would have written the number. Nothing noticed as long as nobody read the events; `events`
+and `resume` did. Gotchas 20-25 in `notes_team.md` have the details, including the `@cache` trap that
+had the console reading a second, empty case store.
+
 > Wider notes on the framework (dispatch, telemetry, lifecycle, gotchas) live in `.junie/guidelines.md`.

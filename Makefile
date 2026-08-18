@@ -4,13 +4,15 @@
 #   make            list the targets
 #   make check      what to run before committing
 #   make run CASE=case_2
+#   make watch      the live event feed, in a second terminal
 #
-# CASE is optional: without it the demo lists the store and asks for a case id.
+# CASE is optional: without it the demo lists the store and waits for a command
+# ('help' lists them).
 
 CASE ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help sync lock upgrade run lint fix format format-check check clean clean-data
+.PHONY: help sync lock upgrade run watch lint fix format format-check check clean clean-data
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -32,6 +34,9 @@ upgrade: ## Update the locked dependencies to their newest allowed versions
 
 run: ## Run the sample, optionally on one case: make run CASE=case_2
 	uv run src/main.py $(CASE)
+
+watch: ## Follow the live event feed of a running session (second terminal)
+	tail -f data/live-feed.log
 
 ## --- Quality ---------------------------------------------------------------
 

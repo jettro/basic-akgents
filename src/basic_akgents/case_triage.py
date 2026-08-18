@@ -97,8 +97,6 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
         """Ask the repository for the case; the assessment follows on its answer."""
         self.reply_to = sender
 
-        print("CaseTriageRequest received")
-
         self.update_state(
             {
                 "status": "loading",
