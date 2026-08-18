@@ -11,3 +11,6 @@ wheels/
 
 # IDE files
 .idea
+
+# Runtime data (event store)
+data/

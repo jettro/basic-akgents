@@ -1,4 +1,5 @@
-from akgentic.core import ActorAddress, Akgent, BaseState
+from akgentic.core import ActorAddress, Akgent, BaseState, BaseConfig
+from akgentic.core.agent import WarningError
 from akgentic.core.messages import Message, ResultMessage, UserMessage
 
 from basic_akgents.case_model import CaseConfig
@@ -33,11 +34,8 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
     def on_start(self) -> None:
         """Initialize the case coordinator."""
         self.state = CaseCoordinatorState() # Initialize the first state object
-
-        # Live wiring to the other agents: instance attributes, never state.
         self.triage_agent = None
         self.user_proxy = None
-
         self.state.observer(self)
 
 
@@ -46,13 +44,21 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
                    user_proxy_address: ActorAddress):
         self.triage_agent = triage_agent_address
         self.user_proxy = user_proxy_address
+        print("CaseCoordinatorAgent agents set")
 
     def receiveMsg_HandleCaseRequest(self, message: HandleCaseRequest, sender: ActorAddress) -> None:
         """Start the case by having it triaged, everything we need is in the case."""
+        self.user_proxy = self.user_proxy or sender
         self.update_state({"status": "triaging", "requester_id": message.requester_id})
+        self.send(self._triage(), CaseTriageRequest(requester_id=message.requester_id))
 
-        if self.triage_agent is not None:
-            self.send(self.triage_agent, CaseTriageRequest(requester_id=message.requester_id))
+    def _triage(self) -> ActorAddress:
+        """Look the colleague up on first use; children exist only after on_start."""
+        if self.triage_agent is None:
+            self.triage_agent = self.get_team_member("@CaseTriage")
+        if self.triage_agent is None:
+            raise WarningError("No @CaseTriage in the team yet.")
+        return self.triage_agent
 
     def receiveMsg_CaseTriageResponse(self, message: CaseTriageResponse, sender: ActorAddress) -> None:
         """Put the proposed priority in front of the human for approval."""

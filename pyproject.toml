@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "akgentic-core>=1.5.4",
+    "akgentic-team[cli]>=1.5.4",
 ]
 
 [project.scripts]

@@ -1,8 +1,8 @@
-from akgentic.core import Akgent, BaseState, ActorAddress
+from akgentic.core import Akgent, BaseState, ActorAddress, BaseConfig
 from akgentic.core.agent import WarningError
 from akgentic.core.messages import Message
 
-from basic_akgents.case_model import CaseConfig
+from basic_akgents.case_model import CaseConfig, CaseMetaData
 from basic_akgents.case_priority import CasePriority
 from basic_akgents.case_repository_agent import (
     CaseInformationRequest,
@@ -86,6 +86,8 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
     def receiveMsg_CaseTriageRequest(self, message: CaseTriageRequest, sender: ActorAddress) -> None:
         """Ask the repository for the case; the assessment follows on its answer."""
         self.reply_to = sender
+
+        print("CaseTriageRequest received")
 
         self.update_state({
             "status": "loading",
@@ -197,6 +199,15 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
                 approved=approved,
             )
         )
+
+    def _case_id(self) -> str:
+        """Team metadata is pushed after the build, so read it on first use.
+            TODO: Not sure if I want to use this. Cannot be used in the on_start, only on first message arrival
+        """
+        if not self._case_id:
+            metadata = self.orchestrator_proxy_ask.get_metadata()
+            self._case_id = metadata.case_id if isinstance(metadata, CaseMetaData) else ""
+        return self._case_id
 
     def _ask_repository(self, message: Message) -> None:
         """Send a request to the agent that owns the case data.

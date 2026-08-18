@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from akgentic.core import ActorAddress, Akgent, BaseState
+from akgentic.core import ActorAddress, Akgent, BaseState, BaseConfig
 from akgentic.core.agent import WarningError
 from akgentic.core.messages import Message
 
