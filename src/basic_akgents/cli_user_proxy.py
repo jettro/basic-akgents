@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import threading
-
 from akgentic.core import ActorAddress, BaseState, UserProxy
 from akgentic.core.messages import ResultMessage, UserMessage
 
@@ -18,24 +16,16 @@ class CliUserProxyAgent(UserProxy):
 
     The agent thread blocks while `input()` waits, which is fine for a console
     demo: messages arriving meanwhile simply queue up in the mailbox.
+
+    Printing is all this agent does. That the case is finished is announced by
+    the coordinator as a `CaseClosed` event, which the console loop picks up
+    through its subscriber - so nothing has to be handed to this agent.
     """
 
     def on_start(self) -> None:
         """Initialize the user proxy."""
         self.state = BaseState()
         self.state.observer(self)
-
-        # Signalled once the team reports the case as handled, so the caller
-        # (main) knows when it may shut the actor system down.
-        self.completed: threading.Event | None = None
-
-    def set_completion_event(self, completed: threading.Event) -> None:
-        """Set the event to signal when the case has been handled.
-
-        Args:
-            completed: Event the caller waits on instead of sleeping.
-        """
-        self.completed = completed
 
     def receiveMsg_UserMessage(self, message: UserMessage, sender: ActorAddress) -> None:  # noqa: N802
         """Ask the human a question and route the answer back to the asker."""
@@ -48,8 +38,5 @@ class CliUserProxyAgent(UserProxy):
         self.process_human_input(answer, message)
 
     def receiveMsg_ResultMessage(self, message: ResultMessage, sender: ActorAddress) -> None:  # noqa: N802
-        """Show the final answer of the team and release the caller."""
+        """Show the final answer of the team."""
         print(f"\n[{_name_of(sender)}] {message.content}")
-
-        if self.completed is not None:
-            self.completed.set()

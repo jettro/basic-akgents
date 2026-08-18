@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from akgentic.core import ActorAddress, Akgent, BaseState, BaseConfig
-from akgentic.core.agent import WarningError
+from akgentic.core import ActorAddress, Akgent, BaseState
 from akgentic.core.messages import Message
 
 from basic_akgents.case_model import CaseConfig
 from basic_akgents.case_priority import CasePriority
-from basic_akgents.case_repository import Case, CaseNotFoundError, CaseRepository
+from basic_akgents.case_repository import Case, CaseNotFoundError, CaseRepository, DEFAULT_CASE_REPOSITORY, \
+    build_case_repository
 
 
 class CaseInformationRequest(Message):
@@ -61,7 +61,12 @@ class CaseUpdateResponse(Message):
     case: Case | None = None
 
 class CaseRepositoryConfig(CaseConfig):
-    pass
+    """Config of the case store owner.
+
+    Attributes:
+        backend: Dotted path of the `CaseRepository` implementation to use.
+    """
+    backend: str = DEFAULT_CASE_REPOSITORY
 
 class CaseRepositoryState(BaseState):
     """Traffic to the store, so the telemetry shows who reads and writes."""
@@ -80,22 +85,14 @@ class CaseRepositoryAgent(Akgent[CaseRepositoryConfig, CaseRepositoryState]):
     """
 
     # Live collaborator, never state: it is not serializable.
-    cases: CaseRepository | None
+    cases: CaseRepository
 
     def on_start(self) -> None:
         self.state = CaseRepositoryState()
 
-        self.cases = None
+        self.cases = build_case_repository(self.config.backend)
 
         self.state.observer(self)
-
-    def set_case_repository(self, repository: CaseRepository) -> None:
-        """Inject the case backend this agent owns.
-
-        Args:
-            repository: Any object implementing `CaseRepository`.
-        """
-        self.cases = repository
 
     def receiveMsg_CaseInformationRequest(self, message: CaseInformationRequest, sender: ActorAddress) -> None:
         """Answer with the case as it is stored."""
@@ -155,7 +152,7 @@ class CaseRepositoryAgent(Akgent[CaseRepositoryConfig, CaseRepositoryState]):
 
         # Frozen fields stay as they are, only the decision is written back.
         case = case.model_copy(update=updates)
-        self._repository().save_case(case)
+        self.cases.save_case(case)
 
         return case
 
@@ -169,20 +166,6 @@ class CaseRepositoryAgent(Akgent[CaseRepositoryConfig, CaseRepositoryState]):
             The stored case, or None when the case system does not know it.
         """
         try:
-            return self._repository().load_case(case_id)
+            return self.cases.load_case(case_id)
         except CaseNotFoundError:
             return None
-
-    def _repository(self) -> CaseRepository:
-        """Return the injected backend.
-
-        Returns:
-            The repository this agent works with.
-
-        Raises:
-            WarningError: If no repository was injected yet.
-        """
-        if self.cases is None:
-            raise WarningError("No case repository available, call set_case_repository first.")
-
-        return self.cases

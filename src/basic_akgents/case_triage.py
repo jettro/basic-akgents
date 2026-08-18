@@ -1,9 +1,12 @@
-from akgentic.core import Akgent, BaseState, ActorAddress, BaseConfig
+from functools import cached_property
+
+from akgentic.core import Akgent, BaseState, ActorAddress
 from akgentic.core.agent import WarningError
 from akgentic.core.messages import Message
 
 from basic_akgents.case_model import CaseConfig, CaseMetaData
 from basic_akgents.case_priority import CasePriority
+from basic_akgents.case_team import CASE_REPOSITORY, find_team_member
 from basic_akgents.case_repository_agent import (
     CaseInformationRequest,
     CaseInformationResponse,
@@ -63,25 +66,19 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
         CasePriorityDecision -> CaseUpdateRequest       -> CaseTriageCompleted
     """
 
-    # Live wiring, never state: an address is not serializable.
-    repository_agent: ActorAddress | None
+    # Whoever asked for this piece of work, never state: an address is not
+    # serializable.
     reply_to: ActorAddress | None
 
     def on_start(self) -> None:
         self.state = CaseTriageState()
-
-        self.repository_agent = None
         self.reply_to = None
-
         self.state.observer(self)
 
-    def set_repository_agent(self, repository_agent_address: ActorAddress) -> None:
-        """Point triage at the agent that owns the case data.
-
-        Args:
-            repository_agent_address: Address of the `CaseRepositoryAgent`.
-        """
-        self.repository_agent = repository_agent_address
+    @cached_property
+    def repository_agent(self) -> ActorAddress:
+        """Address of the case store owner, resolved on the first request."""
+        return find_team_member(self, CASE_REPOSITORY)
 
     def receiveMsg_CaseTriageRequest(self, message: CaseTriageRequest, sender: ActorAddress) -> None:
         """Ask the repository for the case; the assessment follows on its answer."""
@@ -94,7 +91,7 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
             "requester_id": message.requester_id or "unknown",
         })
 
-        self._ask_repository(CaseInformationRequest(case_id=self.config.case_id))
+        self.send(self.repository_agent, CaseInformationRequest(case_id=self.config.case_id))
 
     def receiveMsg_CaseInformationResponse(self, message: CaseInformationResponse, sender: ActorAddress) -> None:
         """Assess the case and propose a priority, without storing it yet."""
@@ -170,12 +167,13 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
 
         self.update_state({"status": "storing", "approved": message.approved})
 
-        self._ask_repository(
+        self.send(
+            self.repository_agent,
             CaseUpdateRequest(
                 case_id=self.config.case_id,
                 case_priority=case_priority,
                 action=action,
-            )
+            ),
         )
 
     def receiveMsg_CaseUpdateResponse(self, message: CaseUpdateResponse, sender: ActorAddress) -> None:
@@ -199,29 +197,6 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
                 approved=approved,
             )
         )
-
-    def _case_id(self) -> str:
-        """Team metadata is pushed after the build, so read it on first use.
-            TODO: Not sure if I want to use this. Cannot be used in the on_start, only on first message arrival
-        """
-        if not self._case_id:
-            metadata = self.orchestrator_proxy_ask.get_metadata()
-            self._case_id = metadata.case_id if isinstance(metadata, CaseMetaData) else ""
-        return self._case_id
-
-    def _ask_repository(self, message: Message) -> None:
-        """Send a request to the agent that owns the case data.
-
-        Args:
-            message: Request for `@CaseRepository`.
-
-        Raises:
-            WarningError: If no repository agent was wired up yet.
-        """
-        if self.repository_agent is None:
-            raise WarningError("No repository agent available, call set_repository_agent first.")
-
-        self.send(self.repository_agent, message)
 
     def _reply(self, message: Message) -> None:
         """Answer whoever asked triage for this piece of work.

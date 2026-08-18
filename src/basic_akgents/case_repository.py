@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from functools import cache
 from typing import Protocol, runtime_checkable
 
+from akgentic.core.utils import import_class
 from pydantic import BaseModel, Field
 
 from basic_akgents.case_priority import CasePriority
@@ -28,6 +30,35 @@ class Case(BaseModel):
 
 class CaseNotFoundError(LookupError):
     """Raised when a case id is unknown to the repository."""
+
+
+# A dotted path, exactly like AgentCard.agent_class: serializable, so it travels
+# in the team card and survives a resume.
+DEFAULT_CASE_REPOSITORY = "basic_akgents.case_repository.DummyCaseRepository"
+
+@cache
+def build_case_repository(backend: str = DEFAULT_CASE_REPOSITORY) -> CaseRepository:
+    """Create the case backend named by a dotted path.
+
+    One instance per backend path: the in-memory store must not be re-seeded
+    when a team is resumed, and a database client should be pooled, not
+    duplicated per agent.
+
+    Args:
+        backend: Fully qualified path of a `CaseRepository` implementation.
+
+    Returns:
+        The backend to work with.
+
+    Raises:
+        TypeError: If the resolved class is not a `CaseRepository`.
+    """
+    repository = import_class(backend)()
+
+    if not isinstance(repository, CaseRepository):
+        raise TypeError(f"{backend!r} does not implement CaseRepository")
+
+    return repository
 
 
 @runtime_checkable

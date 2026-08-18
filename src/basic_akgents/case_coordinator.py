@@ -1,9 +1,12 @@
-from akgentic.core import ActorAddress, Akgent, BaseState, BaseConfig
-from akgentic.core.agent import WarningError
+from functools import cached_property
+
+from akgentic.core import ActorAddress, Akgent, BaseState
 from akgentic.core.messages import Message, ResultMessage, UserMessage
 
+from basic_akgents.case_events import CaseClosed
 from basic_akgents.case_model import CaseConfig
 from basic_akgents.case_priority import PRIORITY_SCALE, TRIAGE_PRIORITIES, CasePriority
+from basic_akgents.case_team import CASE_TRIAGE, USER_PROXY, find_team_member
 from basic_akgents.case_triage import (
     CasePriorityDecision,
     CaseTriageCompleted,
@@ -28,43 +31,42 @@ class CaseCoordinatorConfig(CaseConfig):
     pass
 
 class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
-    triage_agent: ActorAddress | None
-    user_proxy: ActorAddress | None
+    """Runs the case from request to answer, without owning any of the work.
+
+    Colleagues are not handed to this agent, it looks them up by name on the
+    first message that needs them - never in `on_start`, where the children of
+    the team do not exist yet.
+    """
 
     def on_start(self) -> None:
         """Initialize the case coordinator."""
         self.state = CaseCoordinatorState() # Initialize the first state object
-        self.triage_agent = None
-        self.user_proxy = None
         self.state.observer(self)
 
+    @cached_property
+    def triage_agent(self) -> ActorAddress:
+        """Address of triage, resolved on the first case and kept afterwards."""
+        return find_team_member(self, CASE_TRIAGE)
 
-    def set_agents(self,
-                   triage_agent_address: ActorAddress,
-                   user_proxy_address: ActorAddress):
-        self.triage_agent = triage_agent_address
-        self.user_proxy = user_proxy_address
-        print("CaseCoordinatorAgent agents set")
+    @cached_property
+    def user_proxy(self) -> ActorAddress:
+        """Address of the human bridge, resolved on the first question."""
+        return find_team_member(self, USER_PROXY)
 
     def receiveMsg_HandleCaseRequest(self, message: HandleCaseRequest, sender: ActorAddress) -> None:
         """Start the case by having it triaged, everything we need is in the case."""
-        self.user_proxy = self.user_proxy or sender
         self.update_state({"status": "triaging", "requester_id": message.requester_id})
-        self.send(self._triage(), CaseTriageRequest(requester_id=message.requester_id))
-
-    def _triage(self) -> ActorAddress:
-        """Look the colleague up on first use; children exist only after on_start."""
-        if self.triage_agent is None:
-            self.triage_agent = self.get_team_member("@CaseTriage")
-        if self.triage_agent is None:
-            raise WarningError("No @CaseTriage in the team yet.")
-        return self.triage_agent
+        self.send(self.triage_agent, CaseTriageRequest(requester_id=message.requester_id))
 
     def receiveMsg_CaseTriageResponse(self, message: CaseTriageResponse, sender: ActorAddress) -> None:
         """Put the proposed priority in front of the human for approval."""
         if not message.known_case:
-            self.update_state({"status": "closed"})
-            self._report(f"Case {self.config.case_id} closed - {message.reason}")
+            self.update_state({"status": "unknown"})
+            self._close(
+                f"Case {self.config.case_id} closed - {message.reason}",
+                outcome="unknown",
+                case_priority=CasePriority.UNSET,
+            )
             return
 
         if message.already_prioritised:
@@ -74,10 +76,12 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
                 "case_description": message.case_description,
                 "proposed_priority": message.case_priority,
             })
-            self._report(
+            self._close(
                 f"Case {self.config.case_id} was not triaged - {message.reason}.\n"
                 f"  description : {message.case_description}\n"
-                f"  priority    : {message.case_priority.label}"
+                f"  priority    : {message.case_priority.label}",
+                outcome="already_prioritised",
+                case_priority=message.case_priority,
             )
             return
 
@@ -108,32 +112,35 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
 
         self.update_state({"status": "deciding", "proposed_priority": case_priority})
 
-        if self.triage_agent is not None:
-            self.send(
-                self.triage_agent,
-                CasePriorityDecision(
-                    approved=approved,
-                    case_priority=case_priority,
-                    decided_by=self.state.requester_id or "unknown",
-                ),
-            )
+        self.send(
+            self.triage_agent,
+            CasePriorityDecision(
+                approved=approved,
+                case_priority=case_priority,
+                decided_by=self.state.requester_id or "unknown",
+            ),
+        )
 
     def receiveMsg_CaseTriageCompleted(self, message: CaseTriageCompleted, sender: ActorAddress) -> None:
         """Report the recorded outcome of the triage back to the human."""
         if message.approved:
             self.update_state({"status": "handled"})
-            self._report(
+            self._close(
                 f"Case {self.config.case_id} has been triaged.\n"
                 f"  description : {message.case_description}\n"
                 f"  priority    : {message.case_priority.label} (approved by "
-                f"{self.state.requester_id or 'unknown'})"
+                f"{self.state.requester_id or 'unknown'})",
+                outcome="handled",
+                case_priority=message.case_priority,
             )
             return
 
         self.update_state({"status": "rejected"})
-        self._report(
+        self._close(
             f"Case {self.config.case_id} - the proposed priority was rejected, "
-            f"the case keeps priority {message.case_priority.label}."
+            f"the case keeps priority {message.case_priority.label}.",
+            outcome="rejected",
+            case_priority=message.case_priority,
         )
 
     def _read_decision(self, answer: str) -> tuple[bool, CasePriority]:
@@ -163,14 +170,26 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
         Args:
             content: Question shown to the human.
         """
-        if self.user_proxy is not None:
-            self.send(self.user_proxy, UserMessage(content=content))
+        self.send(self.user_proxy, UserMessage(content=content))
 
-    def _report(self, content: str) -> None:
-        """Send the result of the case to the user proxy.
+    def _close(self, content: str, outcome: str, case_priority: CasePriority) -> None:
+        """Report the outcome to the human and announce the case as closed.
+
+        The report is a message to the human bridge, the event is telemetry: it
+        reaches every subscriber of the team and is persisted, so anything
+        outside the team - the console loop, a UI, an audit log - can react to a
+        finished case without knowing this agent.
 
         Args:
             content: Text shown to the human, closing the request.
+            outcome: Final status, mirroring `state.status`.
+            case_priority: Priority the case is left with.
         """
-        if self.user_proxy is not None:
-            self.send(self.user_proxy, ResultMessage(content=content))
+        self.send(self.user_proxy, ResultMessage(content=content))
+        self.notify_event(
+            CaseClosed(
+                case_id=self.config.case_id,
+                outcome=outcome,
+                case_priority=case_priority,
+            )
+        )
