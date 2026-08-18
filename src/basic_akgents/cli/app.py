@@ -10,7 +10,6 @@ from basic_akgents.case_repository import DEMO_CASES
 from basic_akgents.case_runner import CaseRunner
 from basic_akgents.case_team_card import ANY_CASE_ID, case_team_card
 from basic_akgents.cli import console
-from basic_akgents.cli.cli_user_proxy import CliUserProxyAgent
 from basic_akgents.cli.prompts import ask_for_case_id
 
 # Resolved from this file (src/basic_akgents/cli/app.py), so the event store
@@ -35,9 +34,9 @@ def main() -> None:
     console.print_demo_cases(DEMO_CASES)
 
     # The layout is the same for every case, so show it once with a stand-in id.
-    console.print_team(case_team_card(case_id=ANY_CASE_ID, proxy_class=CliUserProxyAgent))
+    console.print_team(case_team_card(case_id=ANY_CASE_ID))
 
-    with CaseRunner(EVENT_STORE_DIR, proxy_class=CliUserProxyAgent) as runner:
+    with CaseRunner(EVENT_STORE_DIR) as runner:
         case_id = args.case_id or ask_for_case_id()
 
         while case_id is not None:

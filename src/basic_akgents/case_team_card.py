@@ -17,13 +17,14 @@ from basic_akgents.case_repository import DEFAULT_CASE_REPOSITORY
 from basic_akgents.case_repository_agent import CaseRepositoryAgent, CaseRepositoryConfig
 from basic_akgents.case_team import CASE_COORDINATOR, CASE_REPOSITORY, CASE_TRIAGE, USER_PROXY
 from basic_akgents.case_triage import CaseTriageAgent, CaseTriageConfig
+from basic_akgents.cli_user_proxy import CliUserProxyAgent
 
 # Stand-in id for showing the layout before a case has been picked: the shape of
 # the team is the same for every case.
 ANY_CASE_ID = "<case id>"
 
 
-def case_team_card(case_id: str, proxy_class: type[UserProxy]) -> TeamCard:
+def case_team_card(case_id: str) -> TeamCard:
     """Describe the team that handles a single case.
 
     The human bridge is passed in rather than hard-coded, so this description
@@ -32,7 +33,6 @@ def case_team_card(case_id: str, proxy_class: type[UserProxy]) -> TeamCard:
 
     Args:
         case_id: Case every agent of the team works on.
-        proxy_class: `UserProxy` subclass that talks to the human.
 
     Returns:
         Card `TeamManager` creates or resumes the team from.
@@ -40,7 +40,7 @@ def case_team_card(case_id: str, proxy_class: type[UserProxy]) -> TeamCard:
     proxy_card = AgentCard(
         description="Bridge between the team and the human at the console.",
         skills=["ask_human"],
-        agent_class=proxy_class,
+        agent_class=CliUserProxyAgent,
         config=BaseConfig(name=USER_PROXY, role="UserProxy"),
     )
 
