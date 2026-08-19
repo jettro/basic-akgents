@@ -56,6 +56,6 @@ def find_team_case_id(agent: Akgent[Any, Any]) -> str:
     """
 
     case_metadata: CaseMetaData = agent.orchestrator_proxy_ask.get_metadata()
-    if case_metadata is None or case_metadata.case_id is None:
+    if not isinstance(case_metadata, CaseMetaData) or case_metadata.case_id is None:
         raise WarningError(f"No case metadata and case_id in the team of {agent.config.name}.")
     return case_metadata.case_id

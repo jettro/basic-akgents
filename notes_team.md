@@ -14,6 +14,53 @@ The Akgents framework has a teams module that provides the tools to manage the l
 
 TeamCard -> Describes the team with all the members and their roles and relationships.
 
+ActorSystem -> The actor system is the central component of the Akgentic framework. It is responsible for managing the lifecycle of agents and teams. It is also responsible for managing the communication between agents and teams.
+
+TeamManager -> The team manager is responsible for managing the lifecycle of teams. It is responsible for creating, archiving, reviving, and repairing teams.
+
+## One case -> One Team -> One case
+A team is created for a single case and stopped again as soon as that case is done, which is what teams in this framework are for.
+
+A stopped team is not gone: its card, its metadata, its events and the last state of every agent stay in the event store. That makes this class the reading side as well - `list_teams`, `load_events`, `load_agent_states` - and `resume_case` puts such a team back together and gives it work again.
+
+## The event store
+
+You need to know the basics about the event store to understand how teams work. The event store is a database that stores all the events that happen in the system. The event store is used by the team manager to manage the lifecycle of teams. The event store is also used by the team manager to manage the communication between agents and teams.
+
+Akgents teams comes with multiple event store implementations. For testing and development, you can use the file based  `YamlEventStore`. Due to its format, you can easily inspect the events and the state of the agents. I leave it to you to explore the event store and the state of the agents.
+
+## The team manager and the teams
+
+The team manager is the central component of the teams module. It is responsible for creating, managing and stopping teams. The team manager is also responsible for managing the communication between agents and teams. In the sample I created the the `CaseRunner`. This contains the initialization of the `TeamManager` and working with teams. 
+
+```python
+from akgentic.team import TeamManager, YamlEventStore
+from akgentic.core import ActorSystem
+
+TeamManager(
+    actor_system=ActorSystem(),
+    event_store=YamlEventStore(event_store_dir),
+    # Shared by every team of this run, so they route on team_id.
+    subscribers=[CaseClosedSubscriber(self._closed), *subscribers],
+)
+```
+
+To create a team for a specific case, we use the `run_case` method. That method produces a `TeamRuntime` object that we can use to interact with the team. The team is kicked-off uby sending a `HandleCaseRequest` message through the runtime. 
+
+```python
+# Part of the run_case method, the construction of the team
+runtime = self._manager.create_team(
+    team_card=case_team_card(),
+    user_id=requester_id,
+    metadata=CaseMetaData(case_id=case_id),
+)
+
+# Send the kickoff message to the team
+runtime.send(HandleCaseRequest(requester_id=requester_id))
+```
+
+Notice that the kickoff message does not contain the `case_id`. This is because the `case_id` is part of the metadata of the team.  
+
 ## Installation
 
 ```bash
@@ -25,13 +72,114 @@ uv add "akgentic-team[cli]"
 ```
 
 ## Pinning down the case_id for a team
-We used to configure the case_id as a static parameters in the config class of the Agents. Now, when working with the teams, there is a metadata module to use for this purpose.
+We used to configure the case_id as a static parameters in the config class of the Agents. This works, but it does not fit the phylosophy of the framework. When working with teams, the agents are constructed based on a TeamCard. This TeamCard can be read from a yaml file. So, the TeamCard is static, and as you will see later on, the TeamCard contains the Agents and all the Agent configuration. Therefore, the framework provides a different mechanism to provide fixed values to the team at Runtime. Akgents teams comes with typed metadata. When starting the team using a team card, you also provide the team metadata. Through the metadata we can pass the case_id. Each Akgent has access to the team metadata through the link with the coordinator.
 
+I want you to have a look at the `TeamCard` class first. Notice how we configure the human proxy `AgentCard` as the entry point. The message type to start the team is the `HandleCaseRequest` message. 
 
+```python
+# Create a TeamCard using existing AgentCard instances
+from akgentic.team import TeamCard, TeamCardMember
 
-## Create the team definition
+TeamCard(
+        name="case-handling-team",
+        description="Handles cases when requested using an id.",
+        entry_point=TeamCardMember(card=human_proxy_card),
+        members=[
+            TeamCardMember(
+                card=coordinator_card, members=[
+                    TeamCardMember(card=triage_agent_card),
+                    TeamCardMember(card=repository_agent_card)
+                ]
+            ),
+        ],
+        message_types=[HandleCaseRequest],
+        metadata_type=CaseMetaData,
+        welcome_message=f"Case team ready to handle your case.",
+    )
+```
 
+Did you notice how we configured the metadata type. I like it that this is a serializable object. Next is the definition of the class for the metadata.
 
+```python
+from akgentic.team import TeamMetadata
+from pydantic import Field
+
+class CaseMetaData(TeamMetadata):
+    case_id: str = Field(json_schema_extra={"indexed": True})
+```
+
+Each agent can use the link to the team through the coordinator to access the metadata.
+
+```python
+from typing import Any
+
+from akgentic.core import ActorAddress, Akgent
+from akgentic.core.agent import WarningError
+
+def find_team_case_id(agent: Akgent[Any, Any]) -> str:
+    """Look up the case ID of the team.
+
+    Args:
+        agent: Agent doing the lookup.
+
+    Returns:
+        Case ID of the team.
+    """
+
+    case_metadata: CaseMetaData = agent.orchestrator_proxy_ask.get_metadata()
+    if not isinstance(case_metadata, CaseMetaData) or case_metadata.case_id is None:
+        raise WarningError(f"No case metadata and case_id in the team of {agent.config.name}.")
+    return case_metadata.case_id
+```
+
+## Handing over the CaseRepository to the CaseRepositoryAgent
+
+In my Java life, I got used to Dependency Injection when writing applications. Therefore, I started this project by ingecting the `DummyCaseRepository` into the `CaseRepositoryAgent` after initialization of the agent. When creating an Akgent through an AgentCard, this is not the right way forward. Therefore, I switched to a Python functionality through an akgentic util to create an instance of a specified class. 
+
+The AgentCard for the CaseRepositoryAgent looks like this.
+
+```python
+from akgentic.core import AgentCard
+
+AgentCard(
+        description="Access cases through a repository.",
+        skills=["repository"],
+        agent_class=CaseRepositoryAgent,
+        config=CaseRepositoryConfig(
+            name="@CaseRepository",
+            role="Repository",
+            backend="basic_akgents.case_repository.DummyCaseRepository",
+        ),
+    )
+```
+
+In the `case_repository.py` file, the `DummyCaseRepository` class is defined. This class is used as the default backend for the `CaseRepositoryAgent` and provides a basic implementation of the `CaseRepository` interface. The agent gets an instance of this repository through this method call.
+
+```python
+from functools import cache
+from akgentic.core.utils import import_class
+
+@cache
+def _case_repository(backend: str) -> CaseRepository:
+    """Build the backend named by a dotted path, once per path.
+
+    Args:
+        backend: Fully qualified path of a `CaseRepository` implementation.
+
+    Returns:
+        The backend to work with.
+
+    Raises:
+        TypeError: If the resolved class is not a `CaseRepository`.
+    """
+    repository = import_class(backend)()
+
+    if not isinstance(repository, CaseRepository):
+        raise TypeError(f"{backend!r} does not implement CaseRepository")
+
+    return repository
+
+```
 
 ## Gotchas
 

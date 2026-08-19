@@ -23,11 +23,6 @@ from basic_akgents.case_team import CASE_COORDINATOR, CASE_REPOSITORY, CASE_TRIA
 from basic_akgents.case_triage import CaseTriageAgent, CaseTriageConfig
 from basic_akgents.cli_user_proxy import CliUserProxyAgent
 
-# Stand-in id for showing the layout before a case has been picked: the shape of
-# the team is the same for every case.
-ANY_CASE_ID = "<case id>"
-
-
 def case_team_card() -> TeamCard:
     """Describe the team that handles a single case.
 
@@ -39,7 +34,7 @@ def case_team_card() -> TeamCard:
     Returns:
         Card `TeamManager` creates or resumes the team from.
     """
-    proxy_card = AgentCard(
+    human_proxy_card = AgentCard(
         description="Bridge between the team and the human at the console.",
         skills=["ask_human"],
         agent_class=CliUserProxyAgent,
@@ -71,22 +66,18 @@ def case_team_card() -> TeamCard:
         ),
     )
 
-    triage_member = TeamCardMember(card=triage_agent_card)
-    repository_member = TeamCardMember(card=repository_agent_card)
-    coordinator_member = TeamCardMember(
-        card=coordinator_card, members=[triage_member, repository_member]
-    )
-    human_member = TeamCardMember(card=proxy_card)
-
     return TeamCard(
         name="case-handling-team",
         description="Handles cases when requested using an id.",
-        entry_point=human_member,
+        entry_point=TeamCardMember(card=human_proxy_card),
         members=[
-            coordinator_member,
+            TeamCardMember(
+                card=coordinator_card, members=[
+                    TeamCardMember(card=triage_agent_card),
+                    TeamCardMember(card=repository_agent_card)
+                ]
+            ),
         ],
-        # Required for runtime.send(str): the first type is what a plain string is
-        # wrapped in. Without it, send() raises RuntimeError.
         message_types=[HandleCaseRequest],
         metadata_type=CaseMetaData,
         welcome_message=f"Case team ready to handle your case.",

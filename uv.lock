@@ -4,29 +4,29 @@ requires-python = ">=3.12"
 
 [[package]]
 name = "akgentic-core"
-version = "1.5.4"
+version = "1.5.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "pykka" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/38/bf/aa4c0b403f9475c57e48a29f998dbb900ec0427d761f307175f72fb0c878/akgentic_core-1.5.4.tar.gz", hash = "sha256:b55b8ef378bf6ef618b3423117e7546e480ebbe5b04aed508696bc49a8a43015", size = 184834, upload-time = "2026-08-12T21:46:01.065Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/aa/48/bd784942688bb6e06b81091881440b5e932d303ab7033911462b9c06d5e9/akgentic_core-1.5.7.tar.gz", hash = "sha256:77c085cfd182952386dfe5c633ff430f1afa7549505cead9cd61911c22b8443a", size = 202402, upload-time = "2026-08-17T23:20:34.799Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/b1/04b73b416a15b396deebf1a394db8041aa6b197d755579df83fdd88eb801/akgentic_core-1.5.4-py3-none-any.whl", hash = "sha256:9e3b928625e569fd9d5bfb368d7a615bf2f22b3a46936157781156032ee0dcd5", size = 80177, upload-time = "2026-08-12T21:45:59.952Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/45/dbd3dcd3fe563589658b014b2097daafdf63a6884a2bd307b67bfe02475e/akgentic_core-1.5.7-py3-none-any.whl", hash = "sha256:3cac00e7679abc4390c653d297d68d4590b289fdd6feb98f7ad975fe9dde4112", size = 85193, upload-time = "2026-08-17T23:20:33.469Z" },
 ]
 
 [[package]]
 name = "akgentic-team"
-version = "1.5.4"
+version = "1.5.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "akgentic-core" },
     { name = "pydantic" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9f/85/ce8e9cb769e874ab627a141187f9d10332a715146b68d19d61a685bb6926/akgentic_team-1.5.4.tar.gz", hash = "sha256:3c49bee64fa9831041d130680b6d2e8de5484ed82c0537a7a9cf4ef1c02a56f6", size = 200676, upload-time = "2026-08-12T22:07:00.889Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/45/09/633ca840a4f006ed95eb7d58f7476c10ed85f281abd64f3739a26282e1df/akgentic_team-1.5.6.tar.gz", hash = "sha256:a43e0d64b3c07e9db7d719e2631fa3c428b71867c908efceb1a3ed9ef0cdfa3a", size = 231885, upload-time = "2026-08-17T15:19:33.628Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7f/f4/b97ff953f88b41df079931906bd271b8860013c5afac87d8300a32e65bbe/akgentic_team-1.5.4-py3-none-any.whl", hash = "sha256:999a73bfceedc9ce1fc09bff30dd318d5400ca447ba997fd5883945f34a086cd", size = 86682, upload-time = "2026-08-12T22:06:59.444Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/db/376d3aceb45280ea5e8a3242287dace3da12d2ddacbe1a716fc2594833b9/akgentic_team-1.5.6-py3-none-any.whl", hash = "sha256:420a159b03e10126277944acc5d1f258614a3e88a04716da3818e1ade12d2536", size = 93145, upload-time = "2026-08-17T15:19:32.307Z" },
 ]
 
 [package.optional-dependencies]

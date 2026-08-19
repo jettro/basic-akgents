@@ -16,7 +16,7 @@ from akgentic.team import Process
 from basic_akgents.case_model import case_id_of
 from basic_akgents.case_repository import build_case_repository
 from basic_akgents.case_runner import CaseRunner
-from basic_akgents.case_team_card import ANY_CASE_ID, case_team_card
+from basic_akgents.case_team_card import case_team_card
 from basic_akgents.cli import console
 from basic_akgents.cli.event_feed import EventFeed
 from basic_akgents.cli.prompts import (
@@ -113,7 +113,7 @@ class ConsoleSession:
 
     def _show_card(self, argument: str) -> None:
         """Show the card a case team is created from, without creating one."""
-        console.print_team(case_team_card(case_id=ANY_CASE_ID))
+        console.print_team(case_team_card())
 
     def _show_teams(self, argument: str) -> None:
         """List the stored teams, `all` including the deleted ones."""
