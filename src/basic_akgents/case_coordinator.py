@@ -1,12 +1,11 @@
 from functools import cached_property
 
-from akgentic.core import ActorAddress, Akgent, BaseState
+from akgentic.core import ActorAddress, Akgent, BaseState, BaseConfig
 from akgentic.core.messages import Message, ResultMessage, UserMessage
 
 from basic_akgents.case_events import CaseClosed
-from basic_akgents.case_model import CaseConfig
 from basic_akgents.case_priority import PRIORITY_SCALE, TRIAGE_PRIORITIES, CasePriority
-from basic_akgents.case_team import CASE_TRIAGE, USER_PROXY, find_team_member
+from basic_akgents.case_team import CASE_TRIAGE, USER_PROXY, find_team_member, find_team_case_id
 from basic_akgents.case_triage import (
     CasePriorityDecision,
     CaseTriageCompleted,
@@ -29,7 +28,7 @@ class CaseCoordinatorState(BaseState):
     proposed_priority: CasePriority = CasePriority.UNSET
 
 
-class CaseCoordinatorConfig(CaseConfig):
+class CaseCoordinatorConfig(BaseConfig):
     pass
 
 
@@ -56,6 +55,11 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
         """Address of the human bridge, resolved on the first question."""
         return find_team_member(self, USER_PROXY)
 
+    @cached_property
+    def team_case_id(self) -> str:
+        """Look up the case ID of the team."""
+        return find_team_case_id(self)
+
     def receiveMsg_HandleCaseRequest(
         self, message: HandleCaseRequest, sender: ActorAddress
     ) -> None:
@@ -70,7 +74,7 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
         if not message.known_case:
             self.update_state({"status": "unknown"})
             self._close(
-                f"Case {self.config.case_id} closed - {message.reason}",
+                f"Case {self.team_case_id} closed - {message.reason}",
                 outcome="unknown",
                 case_priority=CasePriority.UNSET,
             )
@@ -86,7 +90,7 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
                 }
             )
             self._close(
-                f"Case {self.config.case_id} was not triaged - {message.reason}.\n"
+                f"Case {self.team_case_id} was not triaged - {message.reason}.\n"
                 f"  description : {message.case_description}\n"
                 f"  priority    : {message.case_priority.label}",
                 outcome="already_prioritised",
@@ -103,7 +107,7 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
         )
 
         self._ask(
-            f"Case {self.config.case_id}\n"
+            f"Case {self.team_case_id}\n"
             f"  description : {message.case_description}\n"
             f"  reported by : {message.case_sender}\n"
             f"  proposal    : priority {message.case_priority.label}, "
@@ -139,7 +143,7 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
         if message.approved:
             self.update_state({"status": "handled"})
             self._close(
-                f"Case {self.config.case_id} has been triaged.\n"
+                f"Case {self.team_case_id} has been triaged.\n"
                 f"  description : {message.case_description}\n"
                 f"  priority    : {message.case_priority.label} (approved by "
                 f"{self.state.requester_id or 'unknown'})",
@@ -150,7 +154,7 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
 
         self.update_state({"status": "rejected"})
         self._close(
-            f"Case {self.config.case_id} - the proposed priority was rejected, "
+            f"Case {self.team_case_id} - the proposed priority was rejected, "
             f"the case keeps priority {message.case_priority.label}.",
             outcome="rejected",
             case_priority=message.case_priority,
@@ -201,7 +205,7 @@ class CaseCoordinatorAgent(Akgent[CaseCoordinatorConfig, CaseCoordinatorState]):
         self.send(self.user_proxy, ResultMessage(content=content))
         self.notify_event(
             CaseClosed(
-                case_id=self.config.case_id,
+                case_id=self.team_case_id,
                 outcome=outcome,
                 case_priority=case_priority,
             )

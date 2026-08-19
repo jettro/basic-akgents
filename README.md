@@ -93,7 +93,7 @@ result come in a panel, and the colour says what a thing *is*. A priority runs f
 (`1 - critical`) to green (`4 - low`), a team id is blue, the framework's own telemetry stays grey so
 the conversation stands out from it, and an error is red.
 
-The palette is one `Theme` in `src/basic_akgents/terminal.py`, with names instead of colours
+The palette is one `Theme` in `src/basic_akgents/cli/terminal.py`, with names instead of colours
 (`heading`, `priority.critical`, `msg.telemetry`), so the whole demo is repainted in one place. Rich
 drops the colour by itself when stdout is not a terminal and honours `NO_COLOR`, so
 `uv run src/main.py case_1 > run.txt` still gives plain text - and `data/live-feed.log` is written
@@ -253,7 +253,7 @@ this session and the guard closes it as `already_prioritised`.
 | `src/basic_akgents/cli/session.py` | `ConsoleSession`, one typed command translated into one call |
 | `src/basic_akgents/cli/prompts.py` | The command catalogue and the parser for a typed line |
 | `src/basic_akgents/cli/console.py` | Every `print` of the demo, including the message renderer |
-| `src/basic_akgents/terminal.py` | The shared `rich` console and the colour theme, used by the agents too |
+| `src/basic_akgents/cli/terminal.py` | The shared `rich` console and the colour theme, used by the agents too |
 | `src/basic_akgents/cli/event_feed.py` | `EventFeed`, drains the tap: tail, live echo, log file |
 | `src/basic_akgents/event_tap.py` | `EventTap`, a subscriber that keeps every message of every team |
 | `src/basic_akgents/case_team_card.py` | `case_team_card`, the whole declaration of a case team |
@@ -287,5 +287,5 @@ this session and the guard closes it as `already_prioritised`.
   bridge; nothing else in the team changes.
 - Ask the orchestrator what `@CaseRepository` did: its state snapshot counts the reads and writes, so
   every touch of the case store is visible in the telemetry.
-- Repaint the demo: change `"priority.critical"` in the theme of `src/basic_akgents/terminal.py` and
+- Repaint the demo: change `"priority.critical"` in the theme of `src/basic_akgents/cli/terminal.py` and
   every place a critical case is printed follows, because nothing outside that file names a colour.

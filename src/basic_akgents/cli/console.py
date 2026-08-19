@@ -44,7 +44,7 @@ from basic_akgents.case_model import case_id_of
 from basic_akgents.case_priority import CasePriority
 from basic_akgents.case_repository import Case
 from basic_akgents.case_runner import CaseRunResult
-from basic_akgents.terminal import console as out
+from basic_akgents.cli.terminal import console as out
 
 # Wide enough for a sentence, short enough to keep one message on one line.
 PAYLOAD_WIDTH = 90

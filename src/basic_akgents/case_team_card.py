@@ -28,16 +28,13 @@ from basic_akgents.cli_user_proxy import CliUserProxyAgent
 ANY_CASE_ID = "<case id>"
 
 
-def case_team_card(case_id: str) -> TeamCard:
+def case_team_card() -> TeamCard:
     """Describe the team that handles a single case.
 
     The human bridge belongs to the description, so it is named here instead of
     being passed in: the case id is the only thing that differs between two case
     teams. A front end other than the console gets a card function of its own,
     which keeps the callers free of boilerplate they have nothing to decide in.
-
-    Args:
-        case_id: Case every agent of the team works on.
 
     Returns:
         Card `TeamManager` creates or resumes the team from.
@@ -53,14 +50,14 @@ def case_team_card(case_id: str) -> TeamCard:
         description="Orchestrate the case handling.",
         skills=["coordinate"],
         agent_class=CaseCoordinatorAgent,
-        config=CaseCoordinatorConfig(name=CASE_COORDINATOR, role="Coordinator", case_id=case_id),
+        config=CaseCoordinatorConfig(name=CASE_COORDINATOR, role="Coordinator"),
     )
 
     triage_agent_card: AgentCard = AgentCard(
         description="Triage the case and assign it to the appropriate agent.",
         skills=["triage"],
         agent_class=CaseTriageAgent,
-        config=CaseTriageConfig(name=CASE_TRIAGE, role="Triage", case_id=case_id),
+        config=CaseTriageConfig(name=CASE_TRIAGE, role="Triage"),
     )
 
     repository_agent_card: AgentCard = AgentCard(
@@ -70,7 +67,6 @@ def case_team_card(case_id: str) -> TeamCard:
         config=CaseRepositoryConfig(
             name=CASE_REPOSITORY,
             role="Repository",
-            case_id=case_id,
             backend=DEFAULT_CASE_REPOSITORY,
         ),
     )
@@ -93,5 +89,5 @@ def case_team_card(case_id: str) -> TeamCard:
         # wrapped in. Without it, send() raises RuntimeError.
         message_types=[HandleCaseRequest],
         metadata_type=CaseMetaData,
-        welcome_message=f"Case team ready for {case_id}",
+        welcome_message=f"Case team ready to handle your case.",
     )

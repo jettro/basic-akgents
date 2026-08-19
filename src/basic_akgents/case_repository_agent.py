@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from functools import cached_property
 from typing import Any
 
-from akgentic.core import ActorAddress, Akgent, BaseState
+from akgentic.core import ActorAddress, Akgent, BaseState, BaseConfig
 from akgentic.core.messages import Message
 
-from basic_akgents.case_model import CaseConfig
 from basic_akgents.case_priority import CasePriority
 from basic_akgents.case_repository import (
     DEFAULT_CASE_REPOSITORY,
@@ -16,64 +16,53 @@ from basic_akgents.case_repository import (
     CaseRepository,
     build_case_repository,
 )
+from basic_akgents.case_team import find_team_case_id
 
 
 class CaseInformationRequest(Message):
-    """Ask the repository agent for everything known about a case.
-
-    Attributes:
-        case_id: Case to look up, empty means the case of the team.
-    """
-
-    case_id: str = ""
+    """Ask the repository agent for everything known about the team case."""
 
 
 class CaseInformationResponse(Message):
-    """The case as it is stored right now.
+    """The team case as it is stored right now.
 
     Attributes:
-        case_id: Case that was looked up.
         found: Whether the case system knows this case at all.
         case: The stored case, None when it is unknown.
     """
 
-    case_id: str = ""
     found: bool = False
     case: Case | None = None
 
 
 class CaseUpdateRequest(Message):
-    """Ask the repository agent to record a decision on a case.
+    """Ask the repository agent to record a decision on the team case.
 
     The agent reads, changes and writes the case in one handler, so an update
     can never overwrite one that another agent made in between.
 
     Attributes:
-        case_id: Case to update, empty means the case of the team.
         case_priority: Priority to store, `UNSET` leaves the current one alone.
         action: Line to append to the audit log, empty appends nothing.
     """
 
-    case_id: str = ""
     case_priority: CasePriority = CasePriority.UNSET
     action: str = ""
 
 
 class CaseUpdateResponse(Message):
-    """The case as it is stored after the update.
+    """The team case as it is stored after the update.
 
     Attributes:
-        case_id: Case that was updated.
         found: Whether the case system knows this case at all.
         case: The stored case after the write, None when it is unknown.
     """
 
-    case_id: str = ""
     found: bool = False
     case: Case | None = None
 
 
-class CaseRepositoryConfig(CaseConfig):
+class CaseRepositoryConfig(BaseConfig):
     """Config of the case store owner.
 
     Attributes:
@@ -104,6 +93,12 @@ class CaseRepositoryAgent(Akgent[CaseRepositoryConfig, CaseRepositoryState]):
     # Live collaborator, never state: it is not serializable.
     cases: CaseRepository
 
+    @cached_property
+    def team_case_id(self) -> str:
+        """Look up the case ID of the team."""
+        return find_team_case_id(self)
+
+
     def on_start(self) -> None:
         self.state = CaseRepositoryState()
 
@@ -115,28 +110,26 @@ class CaseRepositoryAgent(Akgent[CaseRepositoryConfig, CaseRepositoryState]):
         self, message: CaseInformationRequest, sender: ActorAddress
     ) -> None:
         """Answer with the case as it is stored."""
-        case_id = message.case_id or self.config.case_id
-        case = self._load(case_id)
+        case = self._load(self.team_case_id)
 
         self.update_state(
             {
                 "reads": self.state.reads + 1,
-                "last_case_id": case_id,
+                "last_case_id": self.team_case_id,
                 "status": "ready" if case is not None else "unknown_case",
             }
         )
 
         self.send(
             sender,
-            CaseInformationResponse(case_id=case_id, found=case is not None, case=case),
+            CaseInformationResponse(case_id=self.team_case_id, found=case is not None, case=case),
         )
 
     def receiveMsg_CaseUpdateRequest(
         self, message: CaseUpdateRequest, sender: ActorAddress
     ) -> None:
         """Apply a decision to the case and answer with the stored result."""
-        case_id = message.case_id or self.config.case_id
-        case = self._load(case_id)
+        case = self._load(self.team_case_id)
 
         if case is not None:
             case = self._apply(case, message)
@@ -144,14 +137,14 @@ class CaseRepositoryAgent(Akgent[CaseRepositoryConfig, CaseRepositoryState]):
         self.update_state(
             {
                 "writes": self.state.writes + 1,
-                "last_case_id": case_id,
+                "last_case_id": self.team_case_id,
                 "status": "ready" if case is not None else "unknown_case",
             }
         )
 
         self.send(
             sender,
-            CaseUpdateResponse(case_id=case_id, found=case is not None, case=case),
+            CaseUpdateResponse(found=case is not None, case=case),
         )
 
     def _apply(self, case: Case, message: CaseUpdateRequest) -> Case:

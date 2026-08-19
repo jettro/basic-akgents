@@ -1,16 +1,18 @@
 # Working in teams
 
+Reference to module: https://github.com/b12consulting/akgentic-team
+
 ## Generic remarks
 
 Just like in real life, it is important to be able to work in teams. This means that you need to be able to communicate effectively with your teammates, and to be able to work together towards a common goal. 
 
 We have seen how to group agents and build a tree of agents using the coordinator and by instantiating new agents from existing agents. We did not see how to manage the lifecycle of teams yet. We want to archive teams, revive teams, and repair broken downs teams.
 
-The Akgents framework has a teams module that provides the tools to manage the lifecycle of teams. 
+The Akgents framework has a teams module that provides the tools to manage the lifecycle of teams. In this blog post, I will explore how to use the Akgentic teams module to manage the lifecycle of teams. I will adapt the sample from the previous post in this series of blogs about the Akgentic framework.
 
 ## Different parts of the teams module
 
-TeamCard -> Initialise the 
+TeamCard -> Describes the team with all the members and their roles and relationships.
 
 ## Installation
 

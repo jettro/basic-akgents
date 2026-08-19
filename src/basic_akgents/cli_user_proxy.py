@@ -5,7 +5,7 @@ from __future__ import annotations
 from akgentic.core import ActorAddress, BaseState, UserProxy
 from akgentic.core.messages import ResultMessage, UserMessage
 
-from basic_akgents.terminal import ask, say
+from basic_akgents.cli.terminal import ask, say
 
 
 def _name_of(address: ActorAddress | None) -> str:

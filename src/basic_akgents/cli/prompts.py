@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from basic_akgents.terminal import ask
+from basic_akgents.cli.terminal import ask
 
 # Ways to say "stop", next to Ctrl-D and Ctrl-C.
 QUIT_COMMANDS = ("q", "quit", "exit")

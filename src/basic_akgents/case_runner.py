@@ -136,7 +136,7 @@ class CaseRunner:
             The outcome of the run, timed out or not.
         """
         runtime = self._manager.create_team(
-            team_card=case_team_card(case_id=case_id),
+            team_card=case_team_card(),
             user_id=requester_id,
             metadata=CaseMetaData(case_id=case_id),
         )

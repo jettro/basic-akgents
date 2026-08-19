@@ -1,10 +1,9 @@
 from functools import cached_property
 
-from akgentic.core import ActorAddress, Akgent, BaseState
+from akgentic.core import ActorAddress, Akgent, BaseState, BaseConfig
 from akgentic.core.agent import WarningError
 from akgentic.core.messages import Message
 
-from basic_akgents.case_model import CaseConfig
 from basic_akgents.case_priority import CasePriority
 from basic_akgents.case_repository_agent import (
     CaseInformationRequest,
@@ -12,7 +11,7 @@ from basic_akgents.case_repository_agent import (
     CaseUpdateRequest,
     CaseUpdateResponse,
 )
-from basic_akgents.case_team import CASE_REPOSITORY, find_team_member
+from basic_akgents.case_team import CASE_REPOSITORY, find_team_member, find_team_case_id
 
 URGENT_WORDS = ("urgent", "asap", "immediately", "outage")
 
@@ -54,7 +53,7 @@ class CaseTriageCompleted(Message):
     approved: bool = False
 
 
-class CaseTriageConfig(CaseConfig):
+class CaseTriageConfig(BaseConfig):
     pass
 
 
@@ -91,6 +90,11 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
         """Address of the case store owner, resolved on the first request."""
         return find_team_member(self, CASE_REPOSITORY)
 
+    @cached_property
+    def team_case_id(self) -> str:
+        """Look up the case ID of the team."""
+        return find_team_case_id(self)
+
     def receiveMsg_CaseTriageRequest(
         self, message: CaseTriageRequest, sender: ActorAddress
     ) -> None:
@@ -104,7 +108,7 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
             }
         )
 
-        self.send(self.repository_agent, CaseInformationRequest(case_id=self.config.case_id))
+        self.send(self.repository_agent, CaseInformationRequest(case_id=self.team_case_id))
 
     def receiveMsg_CaseInformationResponse(
         self, message: CaseInformationResponse, sender: ActorAddress
@@ -122,7 +126,7 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
                 CaseTriageResponse(
                     case_sender=self.state.requester_id,
                     known_case=False,
-                    reason=f"Case {self.config.case_id} is not known in the case system.",
+                    reason=f"Case {self.team_case_id} is not known in the case system.",
                 )
             )
             return
@@ -191,7 +195,6 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
         self.send(
             self.repository_agent,
             CaseUpdateRequest(
-                case_id=self.config.case_id,
                 case_priority=case_priority,
                 action=action,
             ),
@@ -208,7 +211,7 @@ class CaseTriageAgent(Akgent[CaseTriageConfig, CaseTriageState]):
 
         if not message.found or case is None:
             raise WarningError(
-                f"Case {self.config.case_id} disappeared before the decision was stored."
+                f"Case {self.team_case_id} disappeared before the decision was stored."
             )
 
         approved = self.state.approved
